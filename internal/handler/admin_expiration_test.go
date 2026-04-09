@@ -66,13 +66,12 @@ func setupExpirationTest(t *testing.T) *expirationTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	registry := idp.NewRegistry(logger)
 	notifier := job.New(database, registry, cryptoSvc, auditLog, logger)
@@ -582,12 +581,12 @@ func newExpirationMockHandler(t *testing.T, database *db.DB, mock *mockExpiratio
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	// Pass nil notifier: error paths return before reaching h.notifier calls.
 	return NewAdminExpirationHandler(mock, nil, renderer, auditLog, logger)
 }
@@ -785,12 +784,12 @@ func TestAdminExpirationSave_ListFiltersReloadError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	notifier := job.New(mock, registry, cryptoSvc, auditLog, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

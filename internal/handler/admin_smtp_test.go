@@ -64,13 +64,13 @@ func setupSMTPTest(t *testing.T) *smtpTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLog, logger)
 
@@ -421,13 +421,13 @@ func TestSMTPSave_SaveConfigError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	renderer := stubSMTPRenderer(t)
 	h := NewAdminSMTPHandler(mockStore, cryptoSvc, renderer, auditLog, logger)
@@ -889,12 +889,12 @@ func newSMTPMockHandler(t *testing.T, database *db.DB, mock *mockSMTPErrStore) *
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	return NewAdminSMTPHandler(mock, cryptoSvc, stubSMTPRenderer(t), auditLog, logger)
 }
 
@@ -956,12 +956,12 @@ func TestSMTPTestEmail_GetEmailTemplateError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	renderer := stubSMTPRenderer(t)
 	h := NewAdminSMTPHandler(mockStore, cryptoSvc, renderer, auditLog, logger)

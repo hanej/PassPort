@@ -76,13 +76,13 @@ func setupMFAHandlerTest(t *testing.T) *mfaHandlerTestEnv {
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewMFAHandler(database, sm, cryptoSvc, registry, renderer, auditLog, logger)
 
@@ -841,12 +841,12 @@ func (env *mfaHandlerTestEnv) newHandlerWithStore(t *testing.T, store db.Store) 
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(env.db, tmpFile.Name(), testLogger())
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	return NewMFAHandler(store, env.sm, env.crypto, env.registry, mfaHandlerStubRenderer(t), auditLog, testLogger())
 }
 

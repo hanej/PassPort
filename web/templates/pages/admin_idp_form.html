@@ -52,22 +52,6 @@
                            value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.Description}}{{end}}"
                            placeholder="Brief description of this provider">
                 </div>
-                <div class="col-12">
-                    <label for="logo_file" class="form-label">Logo</label>
-                    {{if and (eq .Data.Mode "edit") .Data.IDP.LogoURL}}
-                    <div class="mb-2 d-flex align-items-center gap-3" id="current-logo-preview">
-                        <img src="{{.Data.IDP.LogoURL}}" alt="Current logo" height="32" class="border rounded p-1">
-                        <span class="text-muted small">Current logo</span>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('remove_logo').value='1'; document.getElementById('current-logo-preview').classList.add('d-none');">
-                            <i class="bi bi-trash me-1"></i>Remove
-                        </button>
-                    </div>
-                    {{end}}
-                    <input type="hidden" id="remove_logo" name="remove_logo" value="">
-                    <input type="file" class="form-control" id="logo_file" name="logo_file"
-                           accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico">
-                    <div class="form-text">Upload a logo for this provider. Displayed on the login page.</div>
-                </div>
                 <div class="col-md-6">
                     <label for="mfa_provider_id" class="form-label">MFA Provider</label>
                     <select class="form-select" id="mfa_provider_id" name="mfa_provider_id">
@@ -86,6 +70,23 @@
                     </select>
                     <div class="form-text">Which MFA provider to require for this IDP. "Use Default" defers to the global default.</div>
                 </div>
+                <div class="col-12">
+                    <hr class="card-section-divider">
+                    <label for="logo_file" class="form-label">Logo</label>
+                    {{if and (eq .Data.Mode "edit") .Data.IDP.LogoURL}}
+                    <div class="mb-2 d-flex align-items-center gap-3" id="current-logo-preview">
+                        <img src="{{.Data.IDP.LogoURL}}" alt="Current logo" height="32" class="border rounded p-1">
+                        <span class="text-muted small">Current logo</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('remove_logo').value='1'; document.getElementById('current-logo-preview').classList.add('d-none');">
+                            <i class="bi bi-trash me-1"></i>Remove
+                        </button>
+                    </div>
+                    {{end}}
+                    <input type="hidden" id="remove_logo" name="remove_logo" value="">
+                    <input type="file" class="form-control" id="logo_file" name="logo_file"
+                           accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico">
+                    <div class="form-text">Upload a logo for this provider. Displayed on the login page.</div>
+                </div>
             </div>
         </div>
     </div>
@@ -98,18 +99,25 @@
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-6">
-                    <label for="endpoint" class="form-label">Endpoint (host:port)</label>
+                    <label for="endpoint" class="form-label">Endpoint(s) (host:port)</label>
                     <input type="text" class="form-control" id="endpoint" name="endpoint"
                            value="{{if eq .Data.Mode "edit"}}{{.Data.Config.Endpoint}}{{end}}"
-                           required placeholder="e.g., ldap.example.com:636">
+                           required placeholder="e.g., ldap1.example.com:636, ldap2.example.com:636">
+                    <div class="form-text">Comma-separated list for failover. A random endpoint is tried first; if it fails, the others are tried in turn.</div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-3">
                     <label for="protocol" class="form-label">Protocol</label>
                     <select class="form-select" id="protocol" name="protocol" required>
                         <option value="ldap" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "ldap")}}selected{{end}}>LDAP</option>
                         <option value="ldaps" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "ldaps")}}selected{{end}}>LDAPS</option>
                         <option value="starttls" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "starttls")}}selected{{end}}>STARTTLS</option>
                     </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="timeout" class="form-label">Timeout (seconds)</label>
+                    <input type="number" class="form-control" id="timeout" name="timeout"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.Timeout}}{{else}}10{{end}}"
+                           min="1" max="120">
                 </div>
                 <div class="col-md-12">
                     <div class="form-check">
@@ -119,6 +127,26 @@
                             Skip TLS certificate verification
                             <small class="text-muted">(required for self-signed or internal CA certificates)</small>
                         </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <hr class="card-section-divider">
+                </div>
+                <div class="col-md-6">
+                    <label for="svc_username" class="form-label">Service Account Username (Bind DN)</label>
+                    <input type="text" class="form-control" id="svc_username" name="service_account_username"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Secrets.ServiceAccountUsername}}{{end}}"
+                           required placeholder="cn=svc-passport,ou=Service Accounts,dc=example,dc=com">
+                </div>
+                <div class="col-md-6">
+                    <label for="svc_password" class="form-label">Service Account Password</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control password-field" id="svc_password" name="service_account_password"
+                               {{if not (eq .Data.Mode "edit")}}required{{end}}
+                               placeholder="{{if eq .Data.Mode "edit"}}Leave blank to keep current{{else}}Service account password{{end}}">
+                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="svc_password">
+                            <i class="bi bi-eye"></i>
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -143,52 +171,63 @@
         </div>
     </div>
 
-    <!-- Service Account -->
+    <!-- Password Settings -->
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Service Account</h5>
+            <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Password Settings</h5>
         </div>
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-6">
-                    <label for="svc_username" class="form-label">Username (Bind DN)</label>
-                    <input type="text" class="form-control" id="svc_username" name="service_account_username"
-                           value="{{if eq .Data.Mode "edit"}}{{.Data.Secrets.ServiceAccountUsername}}{{end}}"
-                           required placeholder="cn=svc-passport,ou=Service Accounts,dc=example,dc=com">
-                </div>
-                <div class="col-md-6">
-                    <label for="svc_password" class="form-label">Password</label>
-                    <div class="input-group">
-                        <input type="password" class="form-control password-field" id="svc_password" name="service_account_password"
-                               {{if not (eq .Data.Mode "edit")}}required{{end}}
-                               placeholder="{{if eq .Data.Mode "edit"}}Leave blank to keep current{{else}}Service account password{{end}}">
-                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="svc_password">
-                            <i class="bi bi-eye"></i>
-                        </button>
+                    <label class="form-label fw-semibold">Password Policy</label>
+                    <div class="row g-2" id="pw-policy-group">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_uppercase"
+                                       name="password_allow_uppercase"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowUppercase}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_uppercase">Uppercase (A–Z)</label>
+                            </div>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_lowercase"
+                                       name="password_allow_lowercase"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowLowercase}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_lowercase">Lowercase (a–z)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_digits"
+                                       name="password_allow_digits"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowDigits}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_digits">Digits (0–9)</label>
+                            </div>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_special"
+                                       name="password_allow_special"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_special">Special Characters</label>
+                            </div>
+                            <div id="pw-policy-error" class="text-danger small mt-1 d-none">
+                                At least one character class must be enabled.
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="password_special_chars" class="form-label">Allowed Special Characters</label>
+                            <input type="text" class="form-control" id="password_special_chars"
+                                   name="password_special_chars"
+                                   value="{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordSpecialChars}}{{else}}!@#$%^&amp;(){{end}}"
+                                   placeholder="Leave blank for none"
+                                   {{if not (or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars)}}disabled{{end}}>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="password_length" class="form-label">Password Length</label>
+                            <input type="number" class="form-control" id="password_length"
+                                   name="password_length" maxlength="2"
+                                   value="{{if and (eq .Data.Mode "edit") (gt .Data.Config.PasswordLength 0)}}{{.Data.Config.PasswordLength}}{{else}}16{{end}}"
+                                   min="1" max="99">
+                        </div>
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Settings -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Settings</h5>
-        </div>
-        <div class="card-body">
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <label for="timeout" class="form-label">Timeout (seconds)</label>
-                    <input type="number" class="form-control" id="timeout" name="timeout"
-                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.Timeout}}{{else}}10{{end}}"
-                           min="1" max="120">
-                </div>
-                <div class="col-md-3">
-                    <label for="retry_count" class="form-label">Retry Count</label>
-                    <input type="number" class="form-control" id="retry_count" name="retry_count"
-                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.RetryCount}}{{else}}3{{end}}"
-                           min="0" max="10">
                 </div>
                 <div class="col-md-6">
                     <label for="password_hint" class="form-label">
@@ -206,59 +245,8 @@
                         </button>
                     </label>
                     <textarea class="form-control" id="password_hint" name="password_complexity_hint"
-                              rows="4" placeholder="e.g.,&#10;**Minimum 8 characters** including:&#10;- 1 uppercase letter (A–Z)&#10;- 1 number (0–9)&#10;- 1 special character">{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordComplexityHint}}{{end}}</textarea>
+                              rows="6" placeholder="e.g.,&#10;**Minimum 8 characters** including:&#10;- 1 uppercase letter (A–Z)&#10;- 1 number (0–9)&#10;- 1 special character">{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordComplexityHint}}{{end}}</textarea>
                     <div class="form-text">Supports Markdown. Displayed to users when changing their password.</div>
-                </div>
-                <div class="col-12">
-                    <label class="form-label fw-semibold">Random Password Policy</label>
-                    <div class="row g-2 align-items-end" id="pw-policy-group">
-                        <div class="col-md-3">
-                            <div class="form-check form-switch mt-2">
-                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_uppercase"
-                                       name="password_allow_uppercase"
-                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowUppercase}}checked{{end}}>
-                                <label class="form-check-label" for="password_allow_uppercase">Uppercase (A–Z)</label>
-                            </div>
-                            <div class="form-check form-switch mt-2">
-                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_lowercase"
-                                       name="password_allow_lowercase"
-                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowLowercase}}checked{{end}}>
-                                <label class="form-check-label" for="password_allow_lowercase">Lowercase (a–z)</label>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="form-check form-switch mt-2">
-                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_digits"
-                                       name="password_allow_digits"
-                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowDigits}}checked{{end}}>
-                                <label class="form-check-label" for="password_allow_digits">Digits (0–9)</label>
-                            </div>
-                            <div class="form-check form-switch mt-2">
-                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_special"
-                                       name="password_allow_special"
-                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars}}checked{{end}}>
-                                <label class="form-check-label" for="password_allow_special">Special Characters</label>
-                            </div>
-                            <div id="pw-policy-error" class="text-danger small mt-1 d-none">
-                                At least one character class must be enabled.
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="password_special_chars" class="form-label">Allowed Special Characters</label>
-                            <input type="text" class="form-control" id="password_special_chars"
-                                   name="password_special_chars"
-                                   value="{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordSpecialChars}}{{else}}!@#$%^&amp;(){{end}}"
-                                   placeholder="Leave blank for none"
-                                   {{if not (or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars)}}disabled{{end}}>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="password_length" class="form-label">Password Length</label>
-                            <input type="number" class="form-control" id="password_length"
-                                   name="password_length" maxlength="2"
-                                   value="{{if and (eq .Data.Mode "edit") (gt .Data.Config.PasswordLength 0)}}{{.Data.Config.PasswordLength}}{{else}}16{{end}}"
-                                   min="1" max="99">
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

@@ -62,7 +62,7 @@ func (d *DB) ListAudit(ctx context.Context, filter AuditFilter) ([]AuditEntry, i
 	if err != nil {
 		return nil, 0, fmt.Errorf("query audit entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []AuditEntry
 	for rows.Next() {

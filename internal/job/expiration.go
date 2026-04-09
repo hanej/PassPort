@@ -213,7 +213,7 @@ func (n *PasswordExpirationNotifier) RunForIDP(ctx context.Context, idpID string
 	if err != nil {
 		return 0, fmt.Errorf("connecting to LDAP: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := conn.Bind(idpSecrets.ServiceAccountUsername, idpSecrets.ServiceAccountPassword); err != nil {
 		return 0, fmt.Errorf("binding to LDAP: %w", err)
@@ -410,7 +410,7 @@ func (n *PasswordExpirationNotifier) DryRunForIDP(ctx context.Context, idpID str
 	if err != nil {
 		return nil, fmt.Errorf("connecting to LDAP: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := conn.Bind(idpSecrets.ServiceAccountUsername, idpSecrets.ServiceAccountPassword); err != nil {
 		return nil, fmt.Errorf("binding to LDAP: %w", err)

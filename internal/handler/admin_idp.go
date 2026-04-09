@@ -66,7 +66,7 @@ func NewAdminIDPHandler(
 func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoURL string) string {
 	if r.FormValue("remove_logo") == "1" {
 		if currentLogoURL != "" {
-			os.Remove(filepath.Join(h.uploadsDir, filepath.Base(currentLogoURL)))
+			_ = os.Remove(filepath.Join(h.uploadsDir, filepath.Base(currentLogoURL)))
 		}
 		return ""
 	}
@@ -75,7 +75,7 @@ func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoUR
 	if err != nil {
 		return currentLogoURL // no new file uploaded
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".svg" && ext != ".gif" && ext != ".webp" && ext != ".ico" {
@@ -90,7 +90,7 @@ func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoUR
 		h.logger.Error("failed to save IDP logo", "path", destPath, "error", err)
 		return currentLogoURL
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, file); err != nil {
 		h.logger.Error("failed to write IDP logo", "path", destPath, "error", err)
@@ -916,7 +916,7 @@ func (h *AdminIDPHandler) getLDAPConn(ctx context.Context, idpID string) (idp.LD
 	}
 
 	if err := conn.Bind(secrets.ServiceAccountUsername, secrets.ServiceAccountPassword); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, fmt.Errorf("binding to LDAP for %s: %w", idpID, err)
 	}
 
@@ -939,7 +939,7 @@ func (h *AdminIDPHandler) BrowseChildren(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if dn == "" {
 		dn = cfg.BaseDN
@@ -987,6 +987,10 @@ func (h *AdminIDPHandler) BrowseChildren(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
+	sort.Slice(children, func(i, j int) bool {
+		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
+	})
+
 	h.logger.Debug("BrowseChildren result", "idp_id", idpID, "dn", dn, "count", len(children))
 
 	h.renderer.JSON(w, http.StatusOK, children)
@@ -1016,7 +1020,7 @@ func (h *AdminIDPHandler) SearchDirectory(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	searchBase := cfg.BaseDN
 	filter := fmt.Sprintf("(%s=%s)", ldap.EscapeFilter(attr), ldap.EscapeFilter(value))
@@ -1059,6 +1063,10 @@ func (h *AdminIDPHandler) SearchDirectory(w http.ResponseWriter, r *http.Request
 		})
 	}
 
+	sort.Slice(results, func(i, j int) bool {
+		return strings.ToLower(results[i].DN) < strings.ToLower(results[j].DN)
+	})
+
 	h.logger.Debug("SearchDirectory results", "idp_id", idpID, "count", len(results))
 
 	h.renderer.JSON(w, http.StatusOK, map[string]any{
@@ -1090,7 +1098,7 @@ func (h *AdminIDPHandler) ReadEntry(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	searchReq := ldap.NewSearchRequest(
 		dn,
@@ -1098,7 +1106,7 @@ func (h *AdminIDPHandler) ReadEntry(w http.ResponseWriter, r *http.Request) {
 		ldap.NeverDerefAliases,
 		0, 0, false,
 		"(objectClass=*)",
-		[]string{"*"},
+		[]string{"*", "+"},
 		nil,
 	)
 
@@ -1184,10 +1192,6 @@ func (h *AdminIDPHandler) parseIDPConfig(r *http.Request) idp.Config {
 	if timeout <= 0 {
 		timeout = 10
 	}
-	retryCount, _ := strconv.Atoi(r.FormValue("retry_count"))
-	if retryCount <= 0 {
-		retryCount = 1
-	}
 	pwLength, _ := strconv.Atoi(r.FormValue("password_length"))
 	if pwLength <= 0 {
 		pwLength = 24
@@ -1200,7 +1204,6 @@ func (h *AdminIDPHandler) parseIDPConfig(r *http.Request) idp.Config {
 		UserSearchBase:            r.FormValue("user_search_base"),
 		GroupSearchBase:           r.FormValue("group_search_base"),
 		Timeout:                   timeout,
-		RetryCount:                retryCount,
 		TLSSkipVerify:             r.FormValue("tls_skip_verify") == "on",
 		PasswordComplexityHint:    r.FormValue("password_complexity_hint"),
 		SendNotification:          r.FormValue("send_notification") == "on",

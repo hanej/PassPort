@@ -66,13 +66,13 @@ func setupBrowseTest(t *testing.T) *browseTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLog, logger, t.TempDir())
 
@@ -136,7 +136,6 @@ func (env *browseTestEnv) createTestIDPWithConfig(t *testing.T, id string) strin
 		BaseDN:         "dc=example,dc=com",
 		UserSearchBase: "ou=Users,dc=example,dc=com",
 		Timeout:        10,
-		RetryCount:     1,
 	}
 	configJSON, _ := json.Marshal(cfg)
 

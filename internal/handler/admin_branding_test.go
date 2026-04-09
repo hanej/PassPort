@@ -54,13 +54,12 @@ func setupBrandingTest(t *testing.T) *brandingTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	uploadsDir := t.TempDir()
 	h := NewAdminBrandingHandler(database, renderer, auditLog, logger, uploadsDir)
@@ -126,8 +125,7 @@ func buildBrandingMultipartForm(t *testing.T, path string, fields url.Values) *h
 			}
 		}
 	}
-	w.Close()
-
+	_ = w.Close()
 	req := httptest.NewRequest(http.MethodPost, path, &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	return req
@@ -358,8 +356,7 @@ func TestAdminBrandingSave_LogoUpload(t *testing.T) {
 	}
 	// Write fake PNG content.
 	fw.Write([]byte("\x89PNG\r\n\x1a\n")) //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/admin/branding", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := env.serveWithAdminSession(t, env.handler.Save, http.MethodPost, "/admin/branding", cookies, req)
@@ -389,8 +386,7 @@ func TestAdminBrandingSave_LogoInvalidExtension(t *testing.T) {
 		t.Fatalf("creating form file: %v", err)
 	}
 	fw.Write([]byte("MZ")) //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/admin/branding", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := env.serveWithAdminSession(t, env.handler.Save, http.MethodPost, "/admin/branding", cookies, req)
@@ -450,13 +446,12 @@ func TestAdminBrandingShow_DBError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	renderer := stubBrandingRenderer(t)
 	h := NewAdminBrandingHandler(mockStore, renderer, auditLog, logger, t.TempDir())
@@ -484,13 +479,12 @@ func TestAdminBrandingSave_SaveConfigError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	renderer := stubBrandingRenderer(t)
 	h := NewAdminBrandingHandler(mockStore, renderer, auditLog, logger, t.TempDir())
@@ -517,19 +511,19 @@ func TestNewAdminBrandingHandler_MkdirAllError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp file: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	badPath := f.Name() + "/subdir" // path under a regular file is invalid
 
 	tmpAudit, err := os.CreateTemp(t.TempDir(), "audit-*.log")
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}
-	tmpAudit.Close()
+	_ = tmpAudit.Close()
 	auditLog, err := audit.NewLogger(database, tmpAudit.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	renderer := stubBrandingRenderer(t)
 	// NewAdminBrandingHandler should log the error but still return a valid handler.

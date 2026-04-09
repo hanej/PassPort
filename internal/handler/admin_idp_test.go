@@ -73,13 +73,12 @@ func setupIDPTest(t *testing.T) *idpTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLog, logger, t.TempDir())
 
@@ -151,7 +150,6 @@ func (env *idpTestEnv) createTestIDP(t *testing.T) string {
 		BaseDN:         "dc=example,dc=com",
 		UserSearchBase: "ou=Users,dc=example,dc=com",
 		Timeout:        10,
-		RetryCount:     1,
 	}
 	configJSON, _ := json.Marshal(cfg)
 
@@ -227,7 +225,6 @@ func TestIDPCreate(t *testing.T) {
 	form.Set("service_account_username", "cn=admin,dc=example,dc=com")
 	form.Set("service_account_password", "secret123")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	form.Set("source_canonical_attr", "email")
 	form.Set("target_directory_attr", "mail")
 	form.Set("match_mode", "exact")
@@ -296,7 +293,6 @@ func TestIDPUpdate(t *testing.T) {
 	form.Set("service_account_username", "cn=admin,dc=example,dc=com")
 	form.Set("service_account_password", "newsecret")
 	form.Set("timeout", "15")
-	form.Set("retry_count", "3")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = withChiURLParam(r, "id", idpID)
@@ -580,7 +576,6 @@ func TestIDPCreate_WithAttributeMappings(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// Attribute mappings
 	form["canonical_name[]"] = []string{"email", "username"}
 	form["directory_attr[]"] = []string{"mail", "sAMAccountName"}
@@ -626,7 +621,6 @@ func TestIDPCreate_WithMFAProviderID(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	form.Set("mfa_provider_id", mfaID)
 
 	rec := env.serveWithAdminSession(t, env.handler.Create, http.MethodPost, "/admin/idp", cookies, form.Encode())
@@ -655,7 +649,6 @@ func TestIDPUpdate_NotFound(t *testing.T) {
 	form.Set("endpoint", "ldap.example.com:389")
 	form.Set("protocol", "ldap")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = withChiURLParam(r, "id", "nonexistent-idp")
@@ -684,7 +677,6 @@ func TestIDPUpdate_PreserveSecrets(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// No service_account_username or service_account_password — should preserve existing.
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -744,7 +736,6 @@ func TestIDPUpdate_DeleteCorrelationRule(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// No source_canonical_attr
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -766,8 +757,7 @@ func TestHandleLogoUpload_RemoveLogo(t *testing.T) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	mw.WriteField("remove_logo", "1") //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if err := req.ParseMultipartForm(5 << 20); err != nil {
@@ -791,8 +781,7 @@ func TestHandleLogoUpload_ValidPNG(t *testing.T) {
 		t.Fatalf("creating form file: %v", err)
 	}
 	io.WriteString(fw, "fake png data") //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if err := req.ParseMultipartForm(5 << 20); err != nil {
@@ -816,8 +805,7 @@ func TestHandleLogoUpload_InvalidExtension(t *testing.T) {
 		t.Fatalf("creating form file: %v", err)
 	}
 	io.WriteString(fw, "not an image") //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if err := req.ParseMultipartForm(5 << 20); err != nil {
@@ -952,12 +940,12 @@ func newIDPMockEnv(t *testing.T, database *db.DB, mock *mockIDPErrStore) *idpTes
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	h := NewAdminIDPHandler(mock, cryptoSvc, registry, renderer, auditLog, logger, t.TempDir())
 	return &idpTestEnv{
 		db:       database,
@@ -1008,7 +996,6 @@ func TestIDPCreate_DBError(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 
 	rec := env.serveWithAdminSession(t, env.handler.Create, http.MethodPost, "/admin/idp", cookies, form.Encode())
 
@@ -1057,7 +1044,7 @@ func TestIDPShowEdit_DecryptError(t *testing.T) {
 	env := setupIDPTest(t)
 	cookies := env.createAdminSession(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	record := &db.IdentityProviderRecord{
@@ -1088,7 +1075,7 @@ func TestIDPShowEdit_InvalidSecretsJSON(t *testing.T) {
 	env := setupIDPTest(t)
 	cookies := env.createAdminSession(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	// Encrypt content that decrypts to invalid JSON.
@@ -1132,7 +1119,7 @@ func TestIDPUpdate_DBError(t *testing.T) {
 	cookies := env.createAdminSession(t)
 
 	// Create a real IDP so GetIDP succeeds.
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 	record := &db.IdentityProviderRecord{
 		ID:           "update-err-idp",
@@ -1152,7 +1139,6 @@ func TestIDPUpdate_DBError(t *testing.T) {
 	form.Set("protocol", "ldap")
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = withChiURLParam(r, "id", record.ID)
@@ -1185,7 +1171,6 @@ func TestIDPUpdate_RegisterProviderFails(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = withChiURLParam(r, "id", idpID)
@@ -1233,7 +1218,7 @@ func TestIDPToggle_ToggleDBError(t *testing.T) {
 	env := newIDPMockEnv(t, database, mock)
 
 	// Create a real IDP so GetIDP succeeds.
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 	record := &db.IdentityProviderRecord{
 		ID:           "toggle-err-idp",
@@ -1302,7 +1287,7 @@ func TestIDPTestConnection_InvalidConfigJSON(t *testing.T) {
 func TestIDPTestConnection_DecryptError(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	record := &db.IdentityProviderRecord{
@@ -1340,7 +1325,7 @@ func TestIDPTestConnection_DecryptError(t *testing.T) {
 func TestIDPTestConnection_InvalidSecretsJSON(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	// Encrypt content that decrypts to invalid JSON.
@@ -1383,7 +1368,7 @@ func TestIDPTestConnection_InvalidSecretsJSON(t *testing.T) {
 // TestIDPTestConnection_UnknownProviderType covers TestConnection when buildProvider fails → 500 JSON.
 func TestIDPTestConnection_UnknownProviderType(t *testing.T) {
 	database := setupTestDB(t)
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 	// Return an IDP with unknown provider_type via mock (bypasses DB CHECK constraint).
 	fakeRecord := &db.IdentityProviderRecord{
@@ -1477,7 +1462,7 @@ func TestIDPTestConnectionFromForm_SavedPasswordEmpty(t *testing.T) {
 	env := setupIDPTest(t)
 
 	// Create IDP with a username but empty password in saved secrets.
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 	secrets := idp.Secrets{ServiceAccountUsername: "cn=admin,dc=example,dc=com", ServiceAccountPassword: ""}
 	secretsJSON, _ := json.Marshal(secrets)
@@ -1523,7 +1508,7 @@ func TestIDPTestConnectionFromForm_SavedPasswordEmpty(t *testing.T) {
 func TestIDPTestConnectionFromForm_DecryptSavedSecretsFails(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	record := &db.IdentityProviderRecord{
@@ -1559,7 +1544,7 @@ func TestIDPTestConnectionFromForm_DecryptSavedSecretsFails(t *testing.T) {
 func TestIDPTestConnectionFromForm_ParseSavedSecretsFails(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	// Encrypt content that decrypts to invalid JSON.
@@ -1634,7 +1619,7 @@ func TestGetLDAPConn_InvalidConfigJSON(t *testing.T) {
 func TestGetLDAPConn_DecryptError(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	record := &db.IdentityProviderRecord{
@@ -1667,7 +1652,7 @@ func TestGetLDAPConn_DecryptError(t *testing.T) {
 func TestGetLDAPConn_InvalidSecretsJSON(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	secretBlob, err := env.crypto.Encrypt([]byte("not-valid-json{"))
@@ -1775,7 +1760,7 @@ func TestLoadProviders_DBError(t *testing.T) {
 // due to an unknown provider type (error is logged, LoadProviders returns nil).
 func TestLoadProviders_WithBadProviderType(t *testing.T) {
 	database := setupTestDB(t)
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 	// Inject a record with unknown_type via mock (bypasses DB CHECK constraint).
 	fakeRecords := []db.IdentityProviderRecord{
@@ -1825,7 +1810,7 @@ func TestLoadProviders_WithInvalidConfigJSON(t *testing.T) {
 func TestLoadProviders_WithDecryptError(t *testing.T) {
 	env := setupIDPTest(t)
 
-	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10, RetryCount: 1}
+	cfg := idp.Config{Endpoint: "ldap.example.com:389", Protocol: "ldap", Timeout: 10}
 	configJSON, _ := json.Marshal(cfg)
 
 	record := &db.IdentityProviderRecord{
@@ -2165,7 +2150,6 @@ func TestIDPCreate_SetAttributeMappingsError(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// Add attribute mappings to trigger SetAttributeMappings call.
 	form.Add("canonical_name[]", "firstname")
 	form.Add("directory_attr[]", "givenName")
@@ -2195,7 +2179,6 @@ func TestIDPCreate_SetCorrelationRuleError(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// Add correlation rule to trigger SetCorrelationRule call.
 	form.Set("source_canonical_attr", "email")
 
@@ -2230,7 +2213,6 @@ func TestIDPUpdate_SetAttributeMappingsError(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	form.Add("canonical_name[]", "lastname")
 	form.Add("directory_attr[]", "sn")
 
@@ -2265,7 +2247,6 @@ func TestIDPUpdate_SetCorrelationRuleError(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	form.Set("source_canonical_attr", "email")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2314,7 +2295,6 @@ func TestIDPUpdate_LogoChange(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	form.Set("remove_logo", "1")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2345,7 +2325,6 @@ func TestIDPUpdate_BaseDNChange(t *testing.T) {
 	form.Set("base_dn", "dc=changed,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r = withChiURLParam(r, "id", idpID)
@@ -2376,7 +2355,6 @@ func TestIDPUpdate_NoFieldChanges(t *testing.T) {
 	form.Set("base_dn", "dc=example,dc=com")
 	form.Set("user_search_base", "ou=Users,dc=example,dc=com")
 	form.Set("timeout", "10")
-	form.Set("retry_count", "1")
 	// Do NOT set service_account_password (leave blank so "changed" is not triggered).
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2452,12 +2430,12 @@ func TestIDPHandleLogoUpload_CreateError(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	cryptoSvc, _ := crypto.NewService(key, 1)
 	tmpFile, _ := os.CreateTemp(t.TempDir(), "audit-*.log")
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(env.db, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	h := NewAdminIDPHandler(env.db, cryptoSvc, env.registry, stubIDPRenderer(t), auditLog, logger, invalidDir)
 
 	var buf bytes.Buffer
@@ -2467,8 +2445,7 @@ func TestIDPHandleLogoUpload_CreateError(t *testing.T) {
 		t.Fatalf("creating form file: %v", err)
 	}
 	io.WriteString(fw, "fake png data") //nolint:errcheck
-	mw.Close()
-
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if err := req.ParseMultipartForm(5 << 20); err != nil {

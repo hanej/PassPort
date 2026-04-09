@@ -20,29 +20,50 @@ import (
 
 // templateVariables defines available template variables per template type.
 var templateVariables = map[string][]string{
-	"smtp_test":           {"Timestamp"},
-	"forgot_password":     {"Username", "ProviderName", "TempPassword", "Timestamp"},
-	"password_changed":    {"Username", "ProviderName", "Timestamp", "IPAddress"},
-	"password_reset":      {"Username", "ProviderName", "Timestamp"},
-	"password_expiration": {"Username", "ProviderName", "ExpirationDate", "DaysRemaining"},
-	"account_locked":      {"Username", "ProviderName", "Timestamp", "Reason"},
-	"account_unlocked":    {"Username", "ProviderName", "Timestamp"},
+	"smtp_test":               {"Timestamp"},
+	"forgot_password":         {"Username", "ProviderName", "TempPassword", "Timestamp"},
+	"password_changed":        {"Username", "ProviderName", "Timestamp", "IPAddress"},
+	"password_reset":          {"Username", "ProviderName", "Timestamp"},
+	"password_expiration":     {"Username", "ProviderName", "ExpirationDate", "DaysRemaining"},
+	"account_locked":          {"Username", "ProviderName", "Timestamp", "Reason"},
+	"account_unlocked":        {"Username", "ProviderName", "Timestamp"},
+	"expiration_report":       {"ProviderName", "GeneratedDate", "AccountCount", "ReportTable"},
+	"expired_accounts_report": {"ProviderName", "GeneratedDate", "AccountCount", "ReportTable"},
 }
 
 // templateNames maps template types to human-friendly names.
 var templateNames = map[string]string{
-	"smtp_test":           "SMTP Test Email",
-	"forgot_password":     "Forgot Password",
-	"password_changed":    "Password Changed",
-	"password_reset":      "Password Reset",
-	"password_expiration": "Password Expiration Warning (Default)",
-	"account_locked":      "Account Locked",
-	"account_unlocked":    "Account Unlocked",
+	"smtp_test":               "SMTP Test Email",
+	"forgot_password":         "Forgot Password",
+	"password_changed":        "Password Changed",
+	"password_reset":          "Password Reset",
+	"password_expiration":     "Password Expiration Warning (Default)",
+	"account_locked":          "Account Locked",
+	"account_unlocked":        "Account Unlocked",
+	"expiration_report":       "Soon-to-Expire Passwords Report (Default)",
+	"expired_accounts_report": "Expired Accounts Report (Default)",
 }
 
 // IsPasswordExpirationTemplate returns true for both the global and per-IDP expiration templates.
 func IsPasswordExpirationTemplate(templateType string) bool {
 	return templateType == "password_expiration" || strings.HasPrefix(templateType, "password_expiration:")
+}
+
+// IsReportTemplate returns true for global and per-IDP report templates.
+func IsReportTemplate(templateType string) bool {
+	return templateType == "expiration_report" || templateType == "expired_accounts_report" ||
+		strings.HasPrefix(templateType, "expiration_report:") ||
+		strings.HasPrefix(templateType, "expired_accounts_report:")
+}
+
+// reportTemplateBase returns the base template type for a per-IDP report template, or "" if not one.
+func reportTemplateBase(templateType string) string {
+	for _, base := range []string{"expiration_report", "expired_accounts_report"} {
+		if strings.HasPrefix(templateType, base+":") {
+			return base
+		}
+	}
+	return ""
 }
 
 // defaultTemplates holds the default content for each template type (matching the SQL seed).
@@ -77,6 +98,14 @@ var defaultTemplates = map[string]struct {
 	"account_unlocked": {
 		Subject:  "Your account has been unlocked",
 		BodyHTML: `<h2>Account Unlocked</h2><p>Hello {{.Username}},</p><p>Your <strong>{{.ProviderName}}</strong> account has been unlocked as of {{.Timestamp}}.</p><p>You may now log in normally.</p><p>— PassPort</p>`,
+	},
+	"expiration_report": {
+		Subject:  "Soon-to-Expire Passwords Report - {{.ProviderName}}",
+		BodyHTML: `<h2>Soon-to-Expire Passwords Report</h2><p><strong>Provider:</strong> {{.ProviderName}}</p><p><strong>Generated:</strong> {{.GeneratedDate}}</p><p><strong>Accounts:</strong> {{.AccountCount}}</p>{{.ReportTable}}<p>&nbsp;</p><p>This report was generated automatically by PassPort.</p>`,
+	},
+	"expired_accounts_report": {
+		Subject:  "Expired Accounts - {{.ProviderName}}",
+		BodyHTML: `<h2>Expired Accounts</h2><p><strong>Provider:</strong> {{.ProviderName}}</p><p><strong>Generated:</strong> {{.GeneratedDate}}</p><p><strong>Accounts:</strong> {{.AccountCount}}</p>{{.ReportTable}}<p>&nbsp;</p><p>This report was generated automatically by PassPort.</p>`,
 	},
 }
 
@@ -135,6 +164,12 @@ func (h *AdminEmailTemplatesHandler) List(w http.ResponseWriter, r *http.Request
 			name = "Password Expiration Warning — " + idpID
 		}
 		if name == "" {
+			if base := reportTemplateBase(t.TemplateType); base != "" {
+				idpID := strings.TrimPrefix(t.TemplateType, base+":")
+				name = templateNames[base] + " — " + idpID
+			}
+		}
+		if name == "" {
 			name = t.TemplateType
 		}
 		rows = append(rows, templateRow{
@@ -166,7 +201,8 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 
 	sess := auth.SessionFromContext(r.Context())
 
-	// Validate type: either in the global list or a per-IDP password_expiration template.
+	// Validate type: either in the global list, a per-IDP password_expiration template,
+	// or a per-IDP report template.
 	vars, ok := templateVariables[templateType]
 	friendlyName := templateNames[templateType]
 	if !ok && IsPasswordExpirationTemplate(templateType) {
@@ -174,9 +210,15 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 		idpID := strings.TrimPrefix(templateType, "password_expiration:")
 		friendlyName = "Password Expiration Warning — " + idpID
 	} else if !ok {
-		h.logger.Debug("invalid template type", "type", templateType)
-		h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
-		return
+		if base := reportTemplateBase(templateType); base != "" {
+			vars = templateVariables[base]
+			idpID := strings.TrimPrefix(templateType, base+":")
+			friendlyName = templateNames[base] + " — " + idpID
+		} else {
+			h.logger.Debug("invalid template type", "type", templateType)
+			h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
+			return
+		}
 	}
 
 	tmpl, err := h.store.GetEmailTemplate(r.Context(), templateType)
@@ -184,6 +226,12 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 		// For per-IDP templates that don't exist yet, start with the global default.
 		if IsPasswordExpirationTemplate(templateType) && templateType != "password_expiration" {
 			globalTmpl, globalErr := h.store.GetEmailTemplate(r.Context(), "password_expiration")
+			if globalErr == nil {
+				tmpl = globalTmpl
+				tmpl.TemplateType = templateType
+			}
+		} else if base := reportTemplateBase(templateType); base != "" {
+			globalTmpl, globalErr := h.store.GetEmailTemplate(r.Context(), base)
 			if globalErr == nil {
 				tmpl = globalTmpl
 				tmpl.TemplateType = templateType
@@ -223,8 +271,9 @@ func (h *AdminEmailTemplatesHandler) Save(w http.ResponseWriter, r *http.Request
 
 	sess := auth.SessionFromContext(r.Context())
 
-	// Validate type: either in the global list or a per-IDP password_expiration template.
-	if _, ok := templateVariables[templateType]; !ok && !IsPasswordExpirationTemplate(templateType) {
+	// Validate type: either in the global list, a per-IDP password_expiration template,
+	// or a per-IDP report template.
+	if _, ok := templateVariables[templateType]; !ok && !IsPasswordExpirationTemplate(templateType) && !IsReportTemplate(templateType) {
 		h.logger.Debug("invalid template type on save", "type", templateType)
 		h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
 		return

@@ -62,7 +62,7 @@ func (d *DB) ListExpirationFilters(ctx context.Context, idpID string) ([]Expirat
 	if err != nil {
 		return nil, fmt.Errorf("list expiration filters: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var filters []ExpirationFilter
 	for rows.Next() {
@@ -96,7 +96,7 @@ func (d *DB) SaveExpirationFilters(ctx context.Context, idpID string, filters []
 	if err != nil {
 		return fmt.Errorf("preparing insert statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, f := range filters {
 		if _, err := stmt.ExecContext(ctx, idpID, f.Attribute, f.Pattern, f.Description); err != nil {
@@ -118,7 +118,7 @@ func (d *DB) ListEnabledExpirationConfigs(ctx context.Context) ([]ExpirationConf
 	if err != nil {
 		return nil, fmt.Errorf("list enabled expiration configs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var configs []ExpirationConfig
 	for rows.Next() {

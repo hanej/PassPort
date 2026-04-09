@@ -99,13 +99,13 @@ func setupForgotTest(t *testing.T) *forgotTestEnv {
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewForgotPasswordHandler(database, registry, sm, renderer, auditLog, logger)
 
@@ -532,13 +532,13 @@ func newForgotPwMockHandler(t *testing.T, mock *mockForgotPwErrStore) *ForgotPas
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(mock.DB, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	return NewForgotPasswordHandler(mock, registry, sm, renderer, auditLog, logger)
 }

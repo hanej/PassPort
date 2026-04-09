@@ -48,7 +48,7 @@ func (d *DB) ListCorrelationWarnings(ctx context.Context, authUsername string) (
 	if err != nil {
 		return nil, fmt.Errorf("list correlation warnings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var warnings []CorrelationWarning
 	for rows.Next() {

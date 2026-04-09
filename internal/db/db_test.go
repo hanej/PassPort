@@ -17,7 +17,7 @@ func newTestDB(t *testing.T) *DB {
 	if err := d.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 	return d
 }
 
@@ -802,6 +802,32 @@ func TestOpenInvalidPath(t *testing.T) {
 	_, err := Open("/nonexistent/dir/db.sqlite")
 	if err == nil {
 		t.Error("expected error for invalid path, got nil")
+	}
+}
+
+func TestPingWriterClosed(t *testing.T) {
+	d := newTestDB(t)
+
+	if err := d.Writer().Close(); err != nil {
+		t.Fatalf("closing writer: %v", err)
+	}
+
+	err := d.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected writer ping error, got nil")
+	}
+}
+
+func TestPingReaderClosed(t *testing.T) {
+	d := newTestDB(t)
+
+	if err := d.Reader().Close(); err != nil {
+		t.Fatalf("closing reader: %v", err)
+	}
+
+	err := d.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected reader ping error, got nil")
 	}
 }
 
@@ -1635,8 +1661,7 @@ func TestPing_WriterError(t *testing.T) {
 	ctx := context.Background()
 
 	// Close the writer connection to force a ping failure
-	d.writer.Close()
-
+	_ = d.writer.Close()
 	err := d.Ping(ctx)
 	if err == nil {
 		t.Error("expected error when pinging closed writer, got nil")
@@ -1749,8 +1774,7 @@ func TestPing_ReaderError(t *testing.T) {
 	ctx := context.Background()
 
 	// Close the reader to force reader ping to fail; writer is still open
-	d.reader.Close()
-
+	_ = d.reader.Close()
 	err := d.Ping(ctx)
 	if err == nil {
 		t.Error("expected error when pinging closed reader, got nil")
@@ -1926,7 +1950,7 @@ func TestWriteErrors_ClosedWriter(t *testing.T) {
 	run := func(name string, fn func(*DB) error) {
 		t.Run(name, func(t *testing.T) {
 			d := newTestDB(t)
-			d.writer.Close()
+			_ = d.writer.Close()
 			err := fn(d)
 			if err == nil {
 				t.Errorf("%s: expected error with closed writer, got nil", name)
@@ -2052,7 +2076,7 @@ func TestReadErrors_ClosedReader(t *testing.T) {
 	run := func(name string, fn func(*DB) error) {
 		t.Run(name, func(t *testing.T) {
 			d := newTestDB(t)
-			d.reader.Close()
+			_ = d.reader.Close()
 			err := fn(d)
 			if err == nil {
 				t.Errorf("%s: expected error with closed reader, got nil", name)
@@ -2180,8 +2204,7 @@ func TestReadErrors_ClosedReader(t *testing.T) {
 func TestSetAttributeMappings_WriterError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
-
+	_ = d.writer.Close()
 	err := d.SetAttributeMappings(ctx, "idp-a", []AttributeMapping{
 		{IDPID: "idp-a", CanonicalName: "email", DirectoryAttr: "mail"},
 	})
@@ -2194,8 +2217,7 @@ func TestSetAttributeMappings_WriterError(t *testing.T) {
 func TestSaveExpirationFilters_WriterError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
-
+	_ = d.writer.Close()
 	err := d.SaveExpirationFilters(ctx, "idp-a", []ExpirationFilter{
 		{Attribute: "attr", Pattern: "val"},
 	})
@@ -2210,8 +2232,7 @@ func TestSaveExpirationFilters_WriterError(t *testing.T) {
 func TestUpdateIDP_WriterError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
-
+	_ = d.writer.Close()
 	err := d.UpdateIDP(ctx, &IdentityProviderRecord{
 		ID: "i1", FriendlyName: "I", ProviderType: "ad", ConfigJSON: "{}",
 	})
@@ -2787,8 +2808,8 @@ func TestMigrate_WriterError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening memory db: %v", err)
 	}
-	defer d.Close()
-	d.writer.Close()
+	defer func() { _ = d.Close() }()
+	_ = d.writer.Close()
 	if err := d.Migrate(context.Background()); err == nil {
 		t.Error("expected error when migrating with closed writer, got nil")
 	}
@@ -2888,7 +2909,7 @@ func TestSetAndGetMFALoginRequired(t *testing.T) {
 func TestSetMFALoginRequired_WriterError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
+	_ = d.writer.Close()
 	if err := d.SetMFALoginRequired(ctx, true); err == nil {
 		t.Error("expected error when writer is closed")
 	}
@@ -2897,7 +2918,7 @@ func TestSetMFALoginRequired_WriterError(t *testing.T) {
 func TestGetMFALoginRequired_ReaderError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.reader.Close()
+	_ = d.reader.Close()
 	_, err := d.GetMFALoginRequired(ctx)
 	if err == nil {
 		t.Error("expected error when reader is closed")
@@ -2953,7 +2974,7 @@ func TestCorrelationWarning_SetListDelete(t *testing.T) {
 func TestCorrelationWarning_SetError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
+	_ = d.writer.Close()
 	err := d.SetCorrelationWarning(ctx, &CorrelationWarning{
 		AuthUsername: "u", TargetIDPID: "idp", WarningType: "t",
 	})
@@ -2965,7 +2986,7 @@ func TestCorrelationWarning_SetError(t *testing.T) {
 func TestCorrelationWarning_DeleteError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.writer.Close()
+	_ = d.writer.Close()
 	if err := d.DeleteCorrelationWarning(ctx, "u", "idp"); err == nil {
 		t.Error("expected error when writer is closed")
 	}
@@ -2974,7 +2995,7 @@ func TestCorrelationWarning_DeleteError(t *testing.T) {
 func TestCorrelationWarning_ListError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.reader.Close()
+	_ = d.reader.Close()
 	_, err := d.ListCorrelationWarnings(ctx, "u")
 	if err == nil {
 		t.Error("expected error when reader is closed")
@@ -2987,7 +3008,7 @@ func TestCorrelationWarning_ListError(t *testing.T) {
 func TestMigrationsComplete_ReaderError(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()
-	d.reader.Close()
+	_ = d.reader.Close()
 	_, err := d.MigrationsComplete(ctx)
 	if err == nil {
 		t.Error("expected error when reader is closed, got nil")
@@ -3143,7 +3164,7 @@ func TestSaveExpirationFilters_FKConstraintError(t *testing.T) {
 func closedWriterDB(t *testing.T) *DB {
 	t.Helper()
 	d := newTestDB(t)
-	d.writer.Close() // force all subsequent writer ExecContext calls to fail
+	_ = d.writer.Close() // force all subsequent writer ExecContext calls to fail
 	return d
 }
 

@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
@@ -89,7 +91,6 @@ type Config struct {
 	UserSearchBase         string `json:"user_search_base"`
 	GroupSearchBase        string `json:"group_search_base"`
 	Timeout                int    `json:"timeout"`         // seconds, default 10
-	RetryCount             int    `json:"retry_count"`     // default 1
 	TLSSkipVerify          bool   `json:"tls_skip_verify"` // skip TLS certificate verification
 	PasswordComplexityHint string `json:"password_complexity_hint"`
 	SendNotification       bool   `json:"send_notification"`
@@ -112,51 +113,90 @@ type Secrets struct {
 // DefaultLDAPConnector is the production implementation of LDAPConnector.
 type DefaultLDAPConnector struct{}
 
-// Connect establishes an LDAP or LDAPS connection to the given endpoint.
+// Connect establishes an LDAP connection to the given endpoint string.
+// The endpoint may be a comma-separated list; a random one is tried first
+// and the rest are tried in order on failure.
 func (c *DefaultLDAPConnector) Connect(_ context.Context, endpoint, protocol string, timeout int, tlsSkipVerify bool) (LDAPConn, error) {
 	if timeout <= 0 {
 		timeout = 10
 	}
 
-	dialer := &net.Dialer{Timeout: time.Duration(timeout) * time.Second}
-	tlsCfg := &tls.Config{
-		InsecureSkipVerify: tlsSkipVerify,
+	endpoints := splitEndpoints(endpoint)
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no LDAP endpoint specified")
 	}
 
-	var conn *ldap.Conn
-	var err error
+	// Shuffle so a random endpoint is tried first, providing both load
+	// distribution and automatic failover across the list.
+	rand.Shuffle(len(endpoints), func(i, j int) { endpoints[i], endpoints[j] = endpoints[j], endpoints[i] })
 
+	dialer := &net.Dialer{Timeout: time.Duration(timeout) * time.Second}
+	tlsCfg := &tls.Config{InsecureSkipVerify: tlsSkipVerify}
+
+	var lastErr error
+	for _, ep := range endpoints {
+		conn, err := dialLDAP(ep, protocol, dialer, tlsCfg)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+
+	if len(endpoints) == 1 {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("all %d LDAP endpoints failed; last error: %w", len(endpoints), lastErr)
+}
+
+// splitEndpoints parses a comma-separated endpoint string, trimming whitespace
+// and dropping empty entries.
+func splitEndpoints(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// dialLDAP opens a single connection to the given endpoint using the specified protocol.
+func dialLDAP(endpoint, protocol string, dialer *net.Dialer, tlsCfg *tls.Config) (LDAPConn, error) {
 	switch protocol {
 	case "ldaps":
-		conn, err = ldap.DialURL(
+		conn, err := ldap.DialURL(
 			fmt.Sprintf("ldaps://%s", endpoint),
 			ldap.DialWithTLSConfig(tlsCfg),
 			ldap.DialWithDialer(dialer),
 		)
-	case "starttls":
-		// Connect plaintext then upgrade with STARTTLS.
-		conn, err = ldap.DialURL(
-			fmt.Sprintf("ldap://%s", endpoint),
-			ldap.DialWithDialer(dialer),
-		)
-		if err == nil {
-			err = conn.StartTLS(tlsCfg)
-			if err != nil {
-				conn.Close()
-				conn = nil
-			}
+		if err != nil {
+			return nil, fmt.Errorf("connecting to LDAP endpoint %s (%s): %w", endpoint, protocol, err)
 		}
-	case "ldap":
-		conn, err = ldap.DialURL(
+		return conn, nil
+	case "starttls":
+		conn, err := ldap.DialURL(
 			fmt.Sprintf("ldap://%s", endpoint),
 			ldap.DialWithDialer(dialer),
 		)
+		if err != nil {
+			return nil, fmt.Errorf("connecting to LDAP endpoint %s (%s): %w", endpoint, protocol, err)
+		}
+		if err = conn.StartTLS(tlsCfg); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("connecting to LDAP endpoint %s (starttls upgrade): %w", endpoint, err)
+		}
+		return conn, nil
+	case "ldap":
+		conn, err := ldap.DialURL(
+			fmt.Sprintf("ldap://%s", endpoint),
+			ldap.DialWithDialer(dialer),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("connecting to LDAP endpoint %s (%s): %w", endpoint, protocol, err)
+		}
+		return conn, nil
 	default:
 		return nil, fmt.Errorf("unsupported LDAP protocol: %s", protocol)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("connecting to LDAP endpoint %s (%s): %w", endpoint, protocol, err)
-	}
-
-	return conn, nil
 }

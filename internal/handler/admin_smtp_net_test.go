@@ -35,18 +35,18 @@ func fakeSMTPServerHandler(t *testing.T) (addr string, stop func()) {
 			go serveHandlerFakeSMTP(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 func serveHandlerFakeSMTP(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	w := bufio.NewWriter(conn)
 	r := bufio.NewReader(conn)
 
 	send := func(s string) {
-		fmt.Fprintf(w, "%s\r\n", s)
-		w.Flush()
+		_, _ = fmt.Fprintf(w, "%s\r\n", s)
+		_ = w.Flush()
 	}
 
 	send("220 127.0.0.1 SMTP Service Ready")
@@ -144,7 +144,7 @@ func fakeTLSSMTPServerHandler(t *testing.T) (addr string, stop func()) {
 			go serveHandlerFakeSMTP(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 func TestSendEmail_PlainSMTPSuccess(t *testing.T) {
@@ -228,7 +228,7 @@ func TestSmtpSend_PlainSMTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialing fake SMTP: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := smtpSend(client, nil, "from@example.com", "to@example.com", []byte("Subject: Test\r\n\r\nBody")); err != nil {
 		t.Errorf("unexpected error from smtpSend: %v", err)
@@ -238,14 +238,14 @@ func TestSmtpSend_PlainSMTP(t *testing.T) {
 // serveSmtpRejectCmd serves a single SMTP connection and rejects the first command
 // whose uppercase representation starts with rejectPrefix.
 func serveSmtpRejectCmd(conn net.Conn, rejectPrefix string) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	w := bufio.NewWriter(conn)
 	r := bufio.NewReader(conn)
 
 	send := func(s string) {
-		fmt.Fprintf(w, "%s\r\n", s)
-		w.Flush()
+		_, _ = fmt.Fprintf(w, "%s\r\n", s)
+		_ = w.Flush()
 	}
 
 	send("220 127.0.0.1 SMTP Service Ready")
@@ -314,7 +314,7 @@ func fakeSmtpServerRejectCmd(t *testing.T, rejectPrefix string) (addr string, st
 			go serveSmtpRejectCmd(conn, rejectPrefix)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 // fakeTLSSMTPBadGreetingServer starts a TLS SMTP server that sends a 421 response
@@ -335,13 +335,13 @@ func fakeTLSSMTPBadGreetingServer(t *testing.T) (addr string, stop func()) {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				// Send 421 instead of 220 — smtp.NewClient expects 220.
-				fmt.Fprintf(c, "421 Service not available\r\n")
+				_, _ = fmt.Fprintf(c, "421 Service not available\r\n")
 			}(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 // TestSmtpSend_AuthError verifies that smtpSend returns an AUTH error when the
@@ -354,7 +354,7 @@ func TestSmtpSend_AuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialing fake SMTP: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// PlainAuth is permitted on localhost (127.0.0.1) without TLS.
 	auth := smtp.PlainAuth("", "user", "pass", "127.0.0.1")
@@ -374,7 +374,7 @@ func TestSmtpSend_MailFromError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialing fake SMTP: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	err = smtpSend(client, nil, "from@example.com", "to@example.com", []byte("Subject: Test\r\n\r\nBody"))
 	if err == nil {
@@ -392,7 +392,7 @@ func TestSmtpSend_RcptToError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialing fake SMTP: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	err = smtpSend(client, nil, "from@example.com", "to@example.com", []byte("Subject: Test\r\n\r\nBody"))
 	if err == nil {
@@ -410,7 +410,7 @@ func TestSmtpSend_DataError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialing fake SMTP: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	err = smtpSend(client, nil, "from@example.com", "to@example.com", []byte("Subject: Test\r\n\r\nBody"))
 	if err == nil {

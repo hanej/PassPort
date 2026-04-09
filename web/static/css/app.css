@@ -218,6 +218,13 @@ main {
     font-size: 0.8rem;
 }
 
+.card-section-divider {
+    margin: 1rem auto;
+    border: none;
+    border-top: 1px solid var(--pp-gray-600);
+    max-width: 80%;
+}
+
 /* ---- Tables ---- */
 
 .table th {

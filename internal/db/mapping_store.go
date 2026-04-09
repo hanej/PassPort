@@ -68,7 +68,7 @@ func (d *DB) ListMappings(ctx context.Context, authProviderID, authUsername stri
 	if err != nil {
 		return nil, fmt.Errorf("list mappings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var mappings []UserIDPMapping
 	for rows.Next() {
@@ -135,7 +135,7 @@ func (d *DB) SearchMappings(ctx context.Context, filter MappingSearchFilter) ([]
 	if err != nil {
 		return nil, 0, fmt.Errorf("search mappings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var mappings []UserIDPMapping
 	for rows.Next() {
@@ -258,7 +258,7 @@ func (d *DB) ListAllMappings(ctx context.Context) ([]UserIDPMapping, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list all mappings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var mappings []UserIDPMapping
 	for rows.Next() {

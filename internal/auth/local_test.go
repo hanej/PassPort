@@ -256,3 +256,13 @@ func TestGenerateRandomPassword_CharsetContents(t *testing.T) {
 		}
 	}
 }
+
+// TestHashPassword_TooLong verifies that HashPassword returns an error when the
+// password exceeds bcrypt's 72-byte maximum.
+func TestHashPassword_TooLong(t *testing.T) {
+	long := strings.Repeat("x", 73)
+	_, err := HashPassword(long)
+	if err == nil {
+		t.Fatal("expected error for password exceeding bcrypt's 72-byte limit")
+	}
+}

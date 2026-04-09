@@ -148,5 +148,17 @@ function toggleProviderFields(type) {
     var sel = document.getElementById('provider_type');
     if (sel) toggleProviderFields(sel.value);
 })();
+
+// Unsaved changes detection
+(function() {
+    var form = document.querySelector('form:not(.test-connection-form)');
+    var dirty = false;
+    form.addEventListener('change', function() { dirty = true; });
+    form.addEventListener('input', function() { dirty = true; });
+    form.addEventListener('submit', function() { dirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+})();
 </script>
 {{end}}

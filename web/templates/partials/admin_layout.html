@@ -46,6 +46,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "reports"}} active{{end}}" href="/admin/reports">
+                            <i class="bi bi-file-earmark-bar-graph me-2"></i>Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link sidebar-link{{if eq .Data.ActivePage "migrate"}} active{{end}}" href="/admin/migrate">
                             <i class="bi bi-arrow-left-right me-2"></i>Import/Export
                         </a>

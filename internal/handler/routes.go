@@ -48,6 +48,7 @@ type RouterConfig struct {
 	AdminBranding       *AdminBrandingHandler
 	AdminMigrate        *AdminMigrateHandler
 	AdminDocs           *AdminDocsHandler
+	AdminReports        *AdminReportsHandler
 	MFA                 *MFAHandler
 	Sessions            *auth.SessionManager
 	CSRFKey             []byte
@@ -256,6 +257,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 						// Documentation
 						r.Get("/docs", cfg.AdminDocs.Show)
+
+						// Reports
+						r.Get("/reports", cfg.AdminReports.List)
+						r.Get("/reports/{id}/{type}", cfg.AdminReports.Show)
+						r.Post("/reports/{id}/{type}", cfg.AdminReports.Save)
+						r.Post("/reports/{id}/{type}/send", cfg.AdminReports.SendNow)
+						r.Post("/reports/{id}/{type}/preview", cfg.AdminReports.Preview)
 					})
 				})
 			})

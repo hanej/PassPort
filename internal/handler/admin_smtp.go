@@ -377,7 +377,7 @@ func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody 
 	if err != nil {
 		return fmt.Errorf("SMTP dial: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Upgrade with STARTTLS if configured, or if the server advertises it.
 	if cfg.UseStartTLS {
@@ -400,10 +400,10 @@ func sendEmailTLS(addr, host string, skipVerify bool, auth smtp.Auth, from, to s
 
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return fmt.Errorf("SMTP client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	return smtpSend(client, auth, from, to, msg)
 }

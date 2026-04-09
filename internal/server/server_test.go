@@ -138,8 +138,7 @@ func TestStartTLS_Success(t *testing.T) {
 	if err := pem.Encode(cf, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
 		t.Fatalf("encoding cert: %v", err)
 	}
-	cf.Close()
-
+	_ = cf.Close()
 	kf, err := os.Create(keyFile)
 	if err != nil {
 		t.Fatalf("creating key file: %v", err)
@@ -147,8 +146,7 @@ func TestStartTLS_Success(t *testing.T) {
 	if err := pem.Encode(kf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
 		t.Fatalf("encoding key: %v", err)
 	}
-	kf.Close()
-
+	_ = kf.Close()
 	mux := http.NewServeMux()
 	srv := New("127.0.0.1:0", mux, testLogger())
 
@@ -177,7 +175,7 @@ func TestStart_AddressInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("binding listener: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	// Try to start a server on the same address.
 	srv := New(ln.Addr().String(), http.NewServeMux(), testLogger())

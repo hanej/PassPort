@@ -110,7 +110,7 @@ func (h *AdminMigrateHandler) Import(w http.ResponseWriter, r *http.Request) {
 		h.renderMigratePage(w, r, sess, "error", "Please select an export file to import.", nil)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var data migrate.ExportData
 	decoder := json.NewDecoder(file)

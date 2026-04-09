@@ -50,6 +50,7 @@ type ExportIDP struct {
 	CorrelationRule   *ExportCorrelationRule   `json:"correlation_rule"`
 	ExpirationConfig  *ExportExpirationConfig  `json:"expiration_config"`
 	ExpirationFilters []ExportExpirationFilter `json:"expiration_filters"`
+	ReportConfigs     []ExportReportConfig     `json:"report_configs"`
 }
 
 // ExportAttrMapping represents an attribute mapping in the export.
@@ -74,6 +75,24 @@ type ExportExpirationConfig struct {
 
 // ExportExpirationFilter represents an expiration filter in the export.
 type ExportExpirationFilter struct {
+	Attribute   string `json:"attribute"`
+	Pattern     string `json:"pattern"`
+	Description string `json:"description"`
+}
+
+// ExportReportConfig represents a report configuration in the export.
+type ExportReportConfig struct {
+	ReportType           string               `json:"report_type"`
+	Enabled              bool                 `json:"enabled"`
+	CronSchedule         string               `json:"cron_schedule"`
+	DaysBeforeExpiration int                  `json:"days_before_expiration"`
+	Recipients           string               `json:"recipients"`
+	ExcludeDisabled      bool                 `json:"exclude_disabled"`
+	Filters              []ExportReportFilter `json:"filters"`
+}
+
+// ExportReportFilter represents a report exclusion filter in the export.
+type ExportReportFilter struct {
 	Attribute   string `json:"attribute"`
 	Pattern     string `json:"pattern"`
 	Description string `json:"description"`
@@ -130,6 +149,7 @@ type ImportResult struct {
 	MFAProviders   int
 	Branding       bool
 	EmailTemplates int
+	ReportConfigs  int
 	Errors         []string
 }
 
@@ -362,6 +382,32 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 			}
 		}
 
+		// Report configs (one per report type)
+		reportCfgs, err := store.ListReportConfigsForIDP(ctx, rec.ID)
+		if err == nil {
+			for _, rc := range reportCfgs {
+				erc := ExportReportConfig{
+					ReportType:           rc.ReportType,
+					Enabled:              rc.Enabled,
+					CronSchedule:         rc.CronSchedule,
+					DaysBeforeExpiration: rc.DaysBeforeExpiration,
+					Recipients:           rc.Recipients,
+					ExcludeDisabled:      rc.ExcludeDisabled,
+				}
+				rfilters, ferr := store.ListReportFilters(ctx, rec.ID, rc.ReportType)
+				if ferr == nil {
+					for _, f := range rfilters {
+						erc.Filters = append(erc.Filters, ExportReportFilter{
+							Attribute:   f.Attribute,
+							Pattern:     f.Pattern,
+							Description: f.Description,
+						})
+					}
+				}
+				ei.ReportConfigs = append(ei.ReportConfigs, erc)
+			}
+		}
+
 		data.IdentityProviders = append(data.IdentityProviders, ei)
 	}
 
@@ -578,6 +624,38 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 				}
 				if err := store.SaveExpirationFilters(ctx, ei.ID, dbFilters); err != nil {
 					result.Errors = append(result.Errors, fmt.Sprintf("Failed to save expiration filters for IDP %s: %v", ei.ID, err))
+				}
+			}
+
+			// Report configs
+			for _, erc := range ei.ReportConfigs {
+				cfg := &db.ReportConfig{
+					IDPID:                ei.ID,
+					ReportType:           erc.ReportType,
+					Enabled:              erc.Enabled,
+					CronSchedule:         erc.CronSchedule,
+					DaysBeforeExpiration: erc.DaysBeforeExpiration,
+					Recipients:           erc.Recipients,
+					ExcludeDisabled:      erc.ExcludeDisabled,
+				}
+				if err := store.SaveReportConfig(ctx, cfg); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to save report config (%s) for IDP %s: %v", erc.ReportType, ei.ID, err))
+					continue
+				}
+				var dbRFilters []db.ReportFilter
+				for _, f := range erc.Filters {
+					dbRFilters = append(dbRFilters, db.ReportFilter{
+						IDPID:       ei.ID,
+						ReportType:  erc.ReportType,
+						Attribute:   f.Attribute,
+						Pattern:     f.Pattern,
+						Description: f.Description,
+					})
+				}
+				if err := store.SaveReportFilters(ctx, ei.ID, erc.ReportType, dbRFilters); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to save report filters (%s) for IDP %s: %v", erc.ReportType, ei.ID, err))
+				} else {
+					result.ReportConfigs++
 				}
 			}
 

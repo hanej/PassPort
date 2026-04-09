@@ -91,7 +91,7 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// Handle logo file upload.
 	file, header, err := r.FormFile("logo_file")
 	if err == nil {
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		// Validate file type.
 		ext := strings.ToLower(filepath.Ext(header.Filename))
@@ -110,7 +110,7 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 			h.renderBrandingError(w, r, sess, "Failed to save logo file")
 			return
 		}
-		defer out.Close()
+		defer func() { _ = out.Close() }()
 
 		if _, err := io.Copy(out, file); err != nil {
 			h.logger.Error("failed to write logo file", "path", destPath, "error", err)
@@ -127,7 +127,7 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 		// Delete the file if it exists.
 		if logoURL != "" {
 			oldFile := filepath.Join(h.uploadsDir, filepath.Base(logoURL))
-			os.Remove(oldFile)
+			_ = os.Remove(oldFile)
 		}
 		logoURL = ""
 	}

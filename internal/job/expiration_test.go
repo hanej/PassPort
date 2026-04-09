@@ -26,7 +26,7 @@ func openTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(context.Background()); err != nil {
 		t.Fatalf("running migrations: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -53,12 +53,12 @@ func newAuditLogger(t *testing.T, database *db.DB) *audit.Logger {
 	if err != nil {
 		t.Fatalf("creating audit log file: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	al, err := audit.NewLogger(database, f.Name(), testLogger())
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { al.Close() })
+	t.Cleanup(func() { _ = al.Close() })
 	return al
 }
 

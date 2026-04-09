@@ -21,7 +21,7 @@ func newTestDB(t *testing.T) *db.DB {
 	if err := d.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 	return d
 }
 
@@ -412,12 +412,9 @@ func TestFlashRoundTrip(t *testing.T) {
 
 func TestStartPurge(t *testing.T) {
 	d := newTestDB(t)
-	logger := slog.Default()
-	// Use a TTL of 1 second; SQLite's strftime has second-level granularity,
-	// so sub-second TTLs won't register as expired via the SQL purge query.
-	sm := NewSessionManager(d, 1*time.Second, false, logger)
+	sm := NewSessionManager(d, 30*time.Minute, false, slog.Default())
 
-	// Create a session that will expire in 1 second.
+	// Create a session with a long TTL.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	id, err := sm.CreateSession(rec, req, "local", "", "admin", true, false)
@@ -425,21 +422,18 @@ func TestStartPurge(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	// Wait for session to expire (must exceed 1 second for SQLite).
-	time.Sleep(1500 * time.Millisecond)
+	// Force expires_at into the past so the purge SQL will match it.
+	// This avoids SQLite's second-level timestamp granularity being a factor.
+	past := time.Now().UTC().Add(-10 * time.Second)
+	if err := d.TouchSession(context.Background(), id, past); err != nil {
+		t.Fatalf("forcing session expiry: %v", err)
+	}
 
-	// Start purge with a short interval.
+	// Start purge with a short interval and let a cycle fire.
 	ctx, cancel := context.WithCancel(context.Background())
-	sm.StartPurge(ctx, 100*time.Millisecond)
-
-	// Wait for at least one purge cycle.
-	time.Sleep(500 * time.Millisecond)
-
-	// Cancel the purge goroutine.
-	cancel()
-
-	// Give goroutine time to stop.
-	time.Sleep(50 * time.Millisecond)
+	defer cancel()
+	sm.StartPurge(ctx, 50*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	// Session should be purged.
 	_, err = d.GetSession(context.Background(), id)
@@ -704,9 +698,18 @@ func TestRequirePasswordChange_PassThrough(t *testing.T) {
 // mockSessionStore embeds *db.DB and overrides specific methods to inject errors.
 type mockSessionStore struct {
 	*db.DB
+	createSessionErr      error
 	deleteSessionErr      error
 	touchSessionErr       error
 	updateSessionFlashErr error
+	purgeExpiredErr       error
+}
+
+func (m *mockSessionStore) CreateSession(ctx context.Context, s *db.Session) error {
+	if m.createSessionErr != nil {
+		return m.createSessionErr
+	}
+	return m.DB.CreateSession(ctx, s)
 }
 
 func (m *mockSessionStore) DeleteSession(ctx context.Context, id string) error {
@@ -730,12 +733,44 @@ func (m *mockSessionStore) UpdateSessionFlash(ctx context.Context, id, flashJSON
 	return m.DB.UpdateSessionFlash(ctx, id, flashJSON)
 }
 
+func (m *mockSessionStore) PurgeExpired(ctx context.Context) (int64, error) {
+	if m.purgeExpiredErr != nil {
+		return 0, m.purgeExpiredErr
+	}
+	return m.DB.PurgeExpired(ctx)
+}
+
 func newManagerWithMock(t *testing.T) (*SessionManager, *mockSessionStore) {
 	t.Helper()
 	d := newTestDB(t)
 	mock := &mockSessionStore{DB: d}
 	sm := NewSessionManager(mock, 30*time.Minute, false, slog.Default())
 	return sm, mock
+}
+
+// TestCreateSession_StoreError covers CreateSession when the store fails to persist.
+func TestCreateSession_StoreError(t *testing.T) {
+	sm, mock := newManagerWithMock(t)
+	mock.createSessionErr = fmt.Errorf("DB create failed")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	_, err := sm.CreateSession(rec, req, "local", "", "admin", true, false)
+	if err == nil {
+		t.Fatal("expected error when store.CreateSession fails")
+	}
+}
+
+// TestStartPurge_PurgeError covers the error-logging branch inside the purge goroutine.
+func TestStartPurge_PurgeError(t *testing.T) {
+	sm, mock := newManagerWithMock(t)
+	mock.purgeExpiredErr = fmt.Errorf("DB purge failed")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sm.StartPurge(ctx, 50*time.Millisecond)
+	// Let at least one cycle fire the error-log path; must not panic.
+	time.Sleep(150 * time.Millisecond)
 }
 
 // TestDestroySession_DeleteError covers lines 156-161 where DeleteSession fails.
