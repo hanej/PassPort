@@ -1,0 +1,130 @@
+{{define "title"}}Import/Export - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<h3><i class="bi bi-arrow-left-right me-2"></i>Import/Export</h3>
+<p class="text-muted">Export your entire {{(branding).AppTitle}} configuration to a JSON file, or import a previously exported configuration into this installation.</p>
+
+<div class="row g-4">
+    <!-- Export Card -->
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">
+                <i class="bi bi-box-arrow-up me-1"></i>Export Configuration
+            </div>
+            <div class="card-body">
+                <p>Download a complete backup of all configuration including identity providers, SMTP settings, MFA providers, admin groups, user mappings, branding, and email templates.</p>
+                <p class="text-muted small">Encrypted secrets are decrypted and included as plaintext in the export file. Handle the export file securely.</p>
+                <a href="/admin/migrate/export" class="btn btn-primary">
+                    <i class="bi bi-download me-1"></i>Download Export
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Card -->
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">
+                <i class="bi bi-box-arrow-in-down me-1"></i>Import Configuration
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/admin/migrate/import" enctype="multipart/form-data">
+                    {{.CSRFField}}
+
+                    <div class="mb-3">
+                        <label for="import_file" class="form-label fw-semibold">Export File</label>
+                        <input type="file" class="form-control" id="import_file" name="import_file" accept=".json" required>
+                        <div class="form-text">Select a previously exported JSON file.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Sections to Import</label>
+                        <div class="form-text mb-2">Select which sections to include. Existing records will be overwritten.</div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_admins" value="1" id="chk_admins" checked>
+                                    <label class="form-check-label" for="chk_admins">Local Admins</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_idps" value="1" id="chk_idps" checked>
+                                    <label class="form-check-label" for="chk_idps">Identity Providers</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_groups" value="1" id="chk_groups" checked>
+                                    <label class="form-check-label" for="chk_groups">Admin Groups</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_mappings" value="1" id="chk_mappings" checked>
+                                    <label class="form-check-label" for="chk_mappings">User Mappings</label>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_smtp" value="1" id="chk_smtp" checked>
+                                    <label class="form-check-label" for="chk_smtp">SMTP Settings</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_mfa" value="1" id="chk_mfa" checked>
+                                    <label class="form-check-label" for="chk_mfa">MFA Providers</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_branding" value="1" id="chk_branding" checked>
+                                    <label class="form-check-label" for="chk_branding">Branding</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="import_templates" value="1" id="chk_templates" checked>
+                                    <label class="form-check-label" for="chk_templates">Email Templates</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-warning" onclick="return confirm('This will overwrite existing configuration for the selected sections. Continue?')">
+                        <i class="bi bi-upload me-1"></i>Import
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{if .Data.ImportResult}}
+{{$r := .Data.ImportResult}}
+<div class="card mt-4">
+    <div class="card-header fw-semibold">
+        <i class="bi bi-clipboard-check me-1"></i>Import Results
+    </div>
+    <div class="card-body">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>Section</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{if $r.LocalAdmins}}<tr><td>Local Admins</td><td>{{$r.LocalAdmins}} imported</td></tr>{{end}}
+                {{if $r.IDPs}}<tr><td>Identity Providers</td><td>{{$r.IDPs}} imported</td></tr>{{end}}
+                {{if $r.AdminGroups}}<tr><td>Admin Groups</td><td>{{$r.AdminGroups}} imported</td></tr>{{end}}
+                {{if $r.UserMappings}}<tr><td>User Mappings</td><td>{{$r.UserMappings}} imported</td></tr>{{end}}
+                {{if $r.SMTP}}<tr><td>SMTP Settings</td><td>Imported</td></tr>{{end}}
+                {{if $r.MFAProviders}}<tr><td>MFA Providers</td><td>{{$r.MFAProviders}} imported</td></tr>{{end}}
+                {{if $r.Branding}}<tr><td>Branding</td><td>Imported</td></tr>{{end}}
+                {{if $r.EmailTemplates}}<tr><td>Email Templates</td><td>{{$r.EmailTemplates}} imported</td></tr>{{end}}
+            </tbody>
+        </table>
+        {{if $r.Errors}}
+        <div class="mt-3">
+            <h6 class="text-danger">Errors:</h6>
+            <ul class="list-unstyled mb-0">
+                {{range $r.Errors}}
+                <li class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>{{.}}</li>
+                {{end}}
+            </ul>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}
+{{end}}

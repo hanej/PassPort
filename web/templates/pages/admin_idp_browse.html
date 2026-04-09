@@ -1,0 +1,364 @@
+{{define "title"}}LDAP Browser - {{.Data.IDP.FriendlyName}} - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<style>
+.ldap-tree ul { list-style: none; padding-left: 1.2rem; }
+.ldap-tree > ul { padding-left: 0; }
+.ldap-tree li { padding: 2px 0; }
+.ldap-tree .tree-toggle { cursor: pointer; user-select: none; }
+.ldap-tree .tree-toggle:hover { color: #0d6efd; }
+.ldap-tree .tree-node.selected > .tree-toggle { font-weight: bold; color: #0d6efd; }
+.ldap-tree .tree-children { display: none; }
+.ldap-tree .tree-node.expanded > .tree-children { display: block; }
+</style>
+
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/admin/idp">Identity Providers</a></li>
+            <li class="breadcrumb-item active">Browse: {{.Data.IDP.FriendlyName}}</li>
+        </ol>
+    </nav>
+    <div class="d-flex justify-content-between align-items-center">
+        <h3><i class="bi bi-diagram-3 me-2"></i>LDAP Browser - {{.Data.IDP.FriendlyName}}</h3>
+        <a href="/admin/idp" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to Providers
+        </a>
+    </div>
+</div>
+
+<!-- Search Panel -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label for="search-attr" class="form-label form-label-sm mb-1">Search Attribute</label>
+                <select class="form-select form-select-sm" id="search-attr">
+                    {{if eq .Data.ProviderType "ad"}}
+                    <option value="sAMAccountName">sAMAccountName</option>
+                    <option value="userPrincipalName">userPrincipalName</option>
+                    <option value="cn">cn</option>
+                    <option value="displayName">displayName</option>
+                    <option value="mail">mail</option>
+                    <option value="givenName">givenName</option>
+                    <option value="sn">sn (surname)</option>
+                    <option value="employeeID">employeeID</option>
+                    <option value="distinguishedName">distinguishedName</option>
+                    <option value="objectClass">objectClass</option>
+                    {{else}}
+                    <option value="uid">uid</option>
+                    <option value="cn">cn</option>
+                    <option value="displayName">displayName</option>
+                    <option value="mail">mail</option>
+                    <option value="givenName">givenName</option>
+                    <option value="sn">sn (surname)</option>
+                    <option value="krbPrincipalName">krbPrincipalName</option>
+                    <option value="employeeNumber">employeeNumber</option>
+                    <option value="objectClass">objectClass</option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label for="search-value" class="form-label form-label-sm mb-1">Value</label>
+                <input type="text" class="form-control form-control-sm" id="search-value"
+                       placeholder="e.g., jsmith" autocomplete="off">
+            </div>
+            <div class="col-md-3">
+                <button type="button" class="btn btn-sm btn-primary w-100" id="search-btn">
+                    <i class="bi bi-search me-1"></i>Search
+                </button>
+            </div>
+        </div>
+        <div id="search-results" class="mt-2 d-none">
+            <div id="search-loading" class="text-muted small d-none">
+                <span class="spinner-border spinner-border-sm me-1"></span>Searching...
+            </div>
+            <div id="search-error" class="text-danger small d-none"></div>
+            <div id="search-list" class="d-none">
+                <div class="small text-muted mb-1"><span id="search-count"></span> result(s) found</div>
+                <div style="max-height: 200px; overflow-y: auto;">
+                    <table class="table table-sm table-hover mb-0">
+                        <tbody id="search-results-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Left Panel: Directory Tree -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-folder-fill me-2"></i>Directory Tree</h5>
+            </div>
+            <div class="card-body p-2" style="max-height: 600px; overflow-y: auto;">
+                <div id="ldap-tree" class="ldap-tree"
+                     data-idp-id="{{.Data.IDP.ID}}"
+                     data-base-dn="{{.Data.BaseDN}}">
+                    <ul>
+                        <li class="tree-node" data-dn="{{.Data.BaseDN}}">
+                            <span class="tree-toggle">
+                                <i class="bi bi-folder me-1"></i>{{.Data.BaseDN}}
+                            </span>
+                            <ul class="tree-children"></ul>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Attribute Viewer -->
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>Entry Attributes</h5>
+            </div>
+            <div class="card-body">
+                <div id="entry-dn" class="mb-3 d-none">
+                    <strong>DN:</strong> <code id="entry-dn-text"></code>
+                </div>
+
+                <div id="entry-loading" class="text-center py-4 d-none">
+                    <span class="spinner-border spinner-border-sm me-1"></span>Loading attributes...
+                </div>
+
+                <div id="entry-error" class="alert alert-danger d-none"></div>
+
+                <div id="entry-default" class="text-center text-muted py-4">
+                    <i class="bi bi-arrow-left-circle me-1"></i>Select an entry from the tree to view its attributes.
+                </div>
+
+                <div id="entry-content" class="d-none">
+                    <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="table table-sm table-hover align-top mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 30%;">Attribute Name</th>
+                                    <th>Value(s)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="entry-attributes"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const tree = document.getElementById("ldap-tree");
+    const idpID = tree.dataset.idpId;
+    const baseDN = tree.dataset.baseDn;
+
+    function browseChildren(dn) {
+        return fetch("/admin/idp/" + encodeURIComponent(idpID) + "/browse?dn=" + encodeURIComponent(dn), {
+            headers: {"Accept": "application/json"}
+        }).then(function(r) { return r.json(); });
+    }
+
+    function readEntry(dn) {
+        return fetch("/admin/idp/" + encodeURIComponent(idpID) + "/entry?dn=" + encodeURIComponent(dn), {
+            headers: {"Accept": "application/json"}
+        }).then(function(r) { return r.json(); });
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function loadChildren(node) {
+        var dn = node.dataset.dn;
+        var childList = node.querySelector(".tree-children");
+        if (node.dataset.loaded === "true") return;
+        node.dataset.loaded = "true";
+
+        childList.innerHTML = '<li class="text-muted small">Loading...</li>';
+
+        browseChildren(dn).then(function(children) {
+            childList.innerHTML = "";
+            if (children.error) {
+                childList.innerHTML = '<li class="text-danger small">' + escapeHtml(children.error) + '</li>';
+                return;
+            }
+            if (children.length === 0) {
+                childList.innerHTML = '<li class="text-muted small">(no children)</li>';
+                return;
+            }
+            children.forEach(function(child) {
+                var li = document.createElement("li");
+                li.className = "tree-node";
+                li.dataset.dn = child.dn;
+
+                var toggle = document.createElement("span");
+                toggle.className = "tree-toggle";
+                toggle.innerHTML = '<i class="bi bi-folder me-1"></i>' + escapeHtml(child.name);
+
+                var sub = document.createElement("ul");
+                sub.className = "tree-children";
+
+                li.appendChild(toggle);
+                li.appendChild(sub);
+                childList.appendChild(li);
+            });
+        }).catch(function(err) {
+            childList.innerHTML = '<li class="text-danger small">Error: ' + escapeHtml(err.message) + '</li>';
+        });
+    }
+
+    function showEntry(dn) {
+        document.getElementById("entry-default").classList.add("d-none");
+        document.getElementById("entry-error").classList.add("d-none");
+        document.getElementById("entry-content").classList.add("d-none");
+        document.getElementById("entry-loading").classList.remove("d-none");
+        document.getElementById("entry-dn").classList.remove("d-none");
+        document.getElementById("entry-dn-text").textContent = dn;
+
+        readEntry(dn).then(function(data) {
+            document.getElementById("entry-loading").classList.add("d-none");
+            if (data.error) {
+                var errEl = document.getElementById("entry-error");
+                errEl.textContent = data.error;
+                errEl.classList.remove("d-none");
+                return;
+            }
+            var tbody = document.getElementById("entry-attributes");
+            tbody.innerHTML = "";
+            data.attributes.forEach(function(attr) {
+                var tr = document.createElement("tr");
+                var tdName = document.createElement("td");
+                tdName.className = "fw-semibold text-nowrap";
+                tdName.textContent = attr.name;
+                var tdValues = document.createElement("td");
+                tdValues.className = "text-break";
+                tdValues.innerHTML = attr.values.map(escapeHtml).join("<br>");
+                tr.appendChild(tdName);
+                tr.appendChild(tdValues);
+                tbody.appendChild(tr);
+            });
+            document.getElementById("entry-content").classList.remove("d-none");
+        }).catch(function(err) {
+            document.getElementById("entry-loading").classList.add("d-none");
+            var errEl = document.getElementById("entry-error");
+            errEl.textContent = "Error: " + err.message;
+            errEl.classList.remove("d-none");
+        });
+    }
+
+    // Handle clicks on tree toggles
+    tree.addEventListener("click", function(e) {
+        var toggle = e.target.closest(".tree-toggle");
+        if (!toggle) return;
+        e.preventDefault();
+
+        var node = toggle.parentElement;
+        if (!node.classList.contains("tree-node")) return;
+
+        // Toggle expanded state
+        node.classList.toggle("expanded");
+        var icon = toggle.querySelector("i");
+        if (node.classList.contains("expanded")) {
+            icon.className = "bi bi-folder2-open me-1";
+            loadChildren(node);
+        } else {
+            icon.className = "bi bi-folder me-1";
+        }
+
+        // Select this node and show its entry
+        var prev = tree.querySelector(".tree-node.selected");
+        if (prev) prev.classList.remove("selected");
+        node.classList.add("selected");
+        showEntry(node.dataset.dn);
+    });
+
+    // Auto-expand root node
+    var rootNode = tree.querySelector(".tree-node");
+    if (rootNode) {
+        rootNode.classList.add("expanded");
+        rootNode.querySelector("i").className = "bi bi-folder2-open me-1";
+        loadChildren(rootNode);
+    }
+
+    // --- Search ---
+    var searchBtn = document.getElementById("search-btn");
+    var searchInput = document.getElementById("search-value");
+    var searchAttr = document.getElementById("search-attr");
+
+    function doSearch() {
+        var attr = searchAttr.value;
+        var value = searchInput.value.trim();
+        if (!value) return;
+
+        var resultsDiv = document.getElementById("search-results");
+        var loading = document.getElementById("search-loading");
+        var errorEl = document.getElementById("search-error");
+        var listDiv = document.getElementById("search-list");
+        var tbody = document.getElementById("search-results-body");
+        var countEl = document.getElementById("search-count");
+
+        resultsDiv.classList.remove("d-none");
+        loading.classList.remove("d-none");
+        errorEl.classList.add("d-none");
+        listDiv.classList.add("d-none");
+
+        fetch("/admin/idp/" + encodeURIComponent(idpID) + "/search?attr=" + encodeURIComponent(attr) + "&value=" + encodeURIComponent(value), {
+            headers: {"Accept": "application/json"}
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            loading.classList.add("d-none");
+            if (data.error) {
+                errorEl.textContent = data.error;
+                errorEl.classList.remove("d-none");
+                return;
+            }
+            var results = data.results || [];
+            countEl.textContent = results.length;
+            tbody.innerHTML = "";
+
+            if (results.length === 0) {
+                tbody.innerHTML = '<tr><td class="text-muted small">No results found</td></tr>';
+            } else {
+                results.forEach(function(entry) {
+                    var tr = document.createElement("tr");
+                    tr.className = "search-result-row";
+                    tr.style.cursor = "pointer";
+                    tr.dataset.dn = entry.dn;
+                    var td = document.createElement("td");
+                    var code = document.createElement("code");
+                    code.className = "small";
+                    code.textContent = entry.dn;
+                    td.appendChild(code);
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
+                });
+            }
+            listDiv.classList.remove("d-none");
+        })
+        .catch(function(err) {
+            loading.classList.add("d-none");
+            errorEl.textContent = "Search failed: " + err.message;
+            errorEl.classList.remove("d-none");
+        });
+    }
+
+    searchBtn.addEventListener("click", doSearch);
+    searchInput.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") { e.preventDefault(); doSearch(); }
+    });
+
+    // Click a search result to view its attributes
+    document.getElementById("search-results-body").addEventListener("click", function(e) {
+        var row = e.target.closest(".search-result-row");
+        if (!row) return;
+        showEntry(row.dataset.dn);
+    });
+})();
+</script>
+{{end}}

@@ -1,0 +1,152 @@
+{{define "title"}}{{if eq .Data.Mode "create"}}Add{{else}}Edit{{end}} MFA Provider - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/admin/mfa">MFA Providers</a></li>
+            <li class="breadcrumb-item active">{{if eq .Data.Mode "create"}}Add{{else}}Edit{{end}}</li>
+        </ol>
+    </nav>
+    <h3><i class="bi bi-shield-lock me-2"></i>{{if eq .Data.Mode "create"}}Add MFA Provider{{else}}Edit MFA Provider{{end}}</h3>
+</div>
+
+<div id="test-connection-alert" class="alert d-none" role="alert"></div>
+
+<form method="POST" action="{{if eq .Data.Mode "create"}}/admin/mfa{{else}}/admin/mfa/{{.Data.Provider.ID}}{{end}}">
+    {{.CSRFField}}
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">General</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="mfa_name" class="form-label">Name</label>
+                    <input type="text" class="form-control" id="mfa_name" name="name"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Provider.Name}}{{end}}"
+                           placeholder="Production DUO" required>
+                    <div class="form-text">A friendly name for this MFA provider.</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="provider_type" class="form-label">Provider Type</label>
+                    {{if eq .Data.Mode "edit"}}
+                    <input type="text" class="form-control" id="provider_type" name="provider_type"
+                           value="{{.Data.ProviderType}}" readonly>
+                    {{else}}
+                    <select class="form-select" id="provider_type" name="provider_type" onchange="toggleProviderFields(this.value)">
+                        <option value="duo">Duo Security</option>
+                        <option value="email">Email OTP</option>
+                    </select>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{/* DUO-specific fields */}}
+    <div id="duo-fields" class="card mb-4" {{if and (eq .Data.Mode "edit") (ne .Data.ProviderType "duo")}}style="display:none"{{end}}>
+        <div class="card-header">
+            <h5 class="mb-0">Duo Security Configuration</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-12">
+                    <label for="mfa_api_hostname" class="form-label">API Hostname</label>
+                    <input type="text" class="form-control" id="mfa_api_hostname" name="api_hostname"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.APIHostname}}{{end}}"
+                           placeholder="api-XXXXXXXX.duosecurity.com">
+                    <div class="form-text">The Duo API hostname from your Duo Admin Panel.</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="mfa_client_id" class="form-label">Client ID / Integration Key</label>
+                    <input type="text" class="form-control" id="mfa_client_id" name="client_id"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.ClientID}}{{end}}"
+                           placeholder="DIXXXXXXXXXXXXXXXXXX">
+                </div>
+                <div class="col-md-6">
+                    <label for="mfa_client_secret" class="form-label">Client Secret / Secret Key</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control password-field" id="mfa_client_secret" name="client_secret"
+                               placeholder="{{if eq .Data.Mode "edit"}}Leave blank to keep current{{else}}Duo Secret Key{{end}}">
+                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="mfa_client_secret">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <label for="mfa_redirect_uri" class="form-label">Redirect URI</label>
+                    <input type="text" class="form-control" id="mfa_redirect_uri" name="redirect_uri"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.RedirectURI}}{{end}}"
+                           placeholder="https://passport.example.com/mfa/callback">
+                    <div class="form-text">The callback URL configured in your Duo application. Must match exactly.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{/* Email OTP-specific fields */}}
+    <div id="email-fields" class="card mb-4" {{if or (eq .Data.Mode "create") (ne .Data.ProviderType "email")}}style="display:none"{{end}}>
+        <div class="card-header">
+            <h5 class="mb-0">Email OTP Configuration</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="otp_length" class="form-label">OTP Length (digits)</label>
+                    <input type="number" class="form-control" id="otp_length" name="otp_length"
+                           value="{{if and (eq .Data.Mode "edit") .Data.EmailConfig}}{{.Data.EmailConfig.OTPLength}}{{else}}6{{end}}"
+                           min="4" max="10">
+                    <div class="form-text">Number of digits in the OTP code.</div>
+                </div>
+                <div class="col-md-4">
+                    <label for="otp_ttl_minutes" class="form-label">Code Expiry (minutes)</label>
+                    <input type="number" class="form-control" id="otp_ttl_minutes" name="otp_ttl_minutes"
+                           value="{{if and (eq .Data.Mode "edit") .Data.EmailConfig}}{{.Data.EmailConfig.OTPTTLMinutes}}{{else}}5{{end}}"
+                           min="1" max="60">
+                    <div class="form-text">How long the code is valid after sending.</div>
+                </div>
+                <div class="col-md-12">
+                    <label for="email_subject" class="form-label">Email Subject</label>
+                    <input type="text" class="form-control" id="email_subject" name="email_subject"
+                           value="{{if and (eq .Data.Mode "edit") .Data.EmailConfig}}{{.Data.EmailConfig.EmailSubject}}{{else}}Your verification code{{end}}"
+                           placeholder="Your verification code">
+                    <div class="form-text">Subject line for the OTP email. Uses the global SMTP configuration.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between">
+        <div>
+            {{if and (eq .Data.Mode "edit") (ne .Data.Provider.ProviderType "email")}}
+            <form method="POST" action="/admin/mfa/{{.Data.Provider.ID}}/test" class="d-inline test-connection-form">
+                {{.CSRFField}}
+                <button type="submit" class="btn btn-outline-info">
+                    <i class="bi bi-plug me-1"></i>Test Connection
+                </button>
+            </form>
+            {{end}}
+        </div>
+        <div>
+            <a href="/admin/mfa" class="btn btn-outline-secondary me-2">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i>{{if eq .Data.Mode "create"}}Create Provider{{else}}Save Changes{{end}}
+            </button>
+        </div>
+    </div>
+</form>
+
+<script>
+function toggleProviderFields(type) {
+    document.getElementById('duo-fields').style.display = (type === 'duo') ? '' : 'none';
+    document.getElementById('email-fields').style.display = (type === 'email') ? '' : 'none';
+}
+// Set initial visibility on page load (create mode).
+(function() {
+    var sel = document.getElementById('provider_type');
+    if (sel) toggleProviderFields(sel.value);
+})();
+</script>
+{{end}}

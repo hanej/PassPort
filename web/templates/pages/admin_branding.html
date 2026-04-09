@@ -1,0 +1,235 @@
+{{define "title"}}Branding - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<h3><i class="bi bi-palette me-2"></i>Branding</h3>
+<p class="text-muted">Customize the application title, logo, colors, and footer text displayed throughout {{(branding).AppTitle}}.</p>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="/admin/branding" enctype="multipart/form-data">
+                    {{.CSRFField}}
+
+                    <div class="mb-3">
+                        <label for="app_title" class="form-label fw-semibold">Application Title</label>
+                        <input type="text" class="form-control" id="app_title" name="app_title"
+                               value="{{.Data.Config.AppTitle}}" placeholder="PassPort"
+                               oninput="updatePreview()">
+                        <div class="form-text">Full application name shown in page titles.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="app_abbreviation" class="form-label fw-semibold">Abbreviation</label>
+                        <input type="text" class="form-control" id="app_abbreviation" name="app_abbreviation"
+                               value="{{.Data.Config.AppAbbreviation}}" placeholder="PassPort"
+                               oninput="updatePreview()">
+                        <div class="form-text">Short name displayed in the navigation bar.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="app_subtitle" class="form-label fw-semibold">Subtitle</label>
+                        <input type="text" class="form-control" id="app_subtitle" name="app_subtitle"
+                               value="{{.Data.Config.AppSubtitle}}" placeholder="Self-Service Password Management"
+                               oninput="updatePreview()">
+                        <div class="form-text">Tagline shown on the login page.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="logo_file" class="form-label fw-semibold">Logo</label>
+                        {{if .Data.Config.LogoURL}}
+                        <div class="mb-2 d-flex align-items-center gap-3">
+                            <img src="{{.Data.Config.LogoURL}}" alt="Current logo" height="32" class="border rounded p-1">
+                            <span class="text-muted small">Current logo</span>
+                            <label class="btn btn-sm btn-outline-danger mb-0">
+                                <input type="checkbox" name="remove_logo" value="1" class="d-none" onchange="this.form.submit()">
+                                <i class="bi bi-trash me-1"></i>Remove
+                            </label>
+                        </div>
+                        {{end}}
+                        <input type="file" class="form-control" id="logo_file" name="logo_file"
+                               accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico"
+                               onchange="previewLogoFile(this)">
+                        <div class="form-text">Upload a logo image (PNG, JPG, SVG, GIF, WebP, ICO). Recommended height: 28–36px. Leave empty to keep the current logo or use the default shield icon.</div>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6 class="fw-semibold mb-3"><i class="bi bi-palette me-1"></i>Colors</h6>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label for="primary_color" class="form-label fw-semibold">Primary Color</label>
+                            <div class="input-group">
+                                <input type="color" class="form-control form-control-color"
+                                       id="primary_color_picker"
+                                       value="{{if .Data.Config.PrimaryColor}}{{.Data.Config.PrimaryColor}}{{else}}#2c5282{{end}}"
+                                       oninput="syncColor('primary_color_picker','primary_color')">
+                                <input type="text" class="form-control font-monospace"
+                                       id="primary_color" name="primary_color"
+                                       value="{{if .Data.Config.PrimaryColor}}{{.Data.Config.PrimaryColor}}{{else}}#2c5282{{end}}"
+                                       maxlength="7"
+                                       oninput="syncColorText('primary_color','primary_color_picker')">
+                                <button type="button" class="btn btn-outline-secondary"
+                                        onclick="resetColor('primary_color','primary_color_picker','#2c5282')"
+                                        title="Reset to default">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Navbar, active menu items, and primary buttons.</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="primary_light_color" class="form-label fw-semibold">Primary Light Color</label>
+                            <div class="input-group">
+                                <input type="color" class="form-control form-control-color"
+                                       id="primary_light_color_picker"
+                                       value="{{if .Data.Config.PrimaryLightColor}}{{.Data.Config.PrimaryLightColor}}{{else}}#3182ce{{end}}"
+                                       oninput="syncColor('primary_light_color_picker','primary_light_color')">
+                                <input type="text" class="form-control font-monospace"
+                                       id="primary_light_color" name="primary_light_color"
+                                       value="{{if .Data.Config.PrimaryLightColor}}{{.Data.Config.PrimaryLightColor}}{{else}}#3182ce{{end}}"
+                                       maxlength="7"
+                                       oninput="syncColorText('primary_light_color','primary_light_color_picker')">
+                                <button type="button" class="btn btn-outline-secondary"
+                                        onclick="resetColor('primary_light_color','primary_light_color_picker','#3182ce')"
+                                        title="Reset to default">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Hover states and lighter accents.</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                onclick="resetAllColors()">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset colors to default
+                        </button>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <div class="mb-3">
+                        <label for="footer_text" class="form-label fw-semibold">Footer Text</label>
+                        <input type="text" class="form-control" id="footer_text" name="footer_text"
+                               value="{{.Data.Config.FooterText}}" placeholder="Optional custom footer text"
+                               oninput="updatePreview()">
+                        <div class="form-text">Optional text appended after "© 2026 PassPort" in the footer. Leave blank to show nothing extra.</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg me-1"></i>Save Branding
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card sticky-top" style="top: 1rem;">
+            <div class="card-header fw-semibold">
+                <i class="bi bi-eye me-1"></i>Preview
+            </div>
+            <div class="card-body">
+                <h6 class="text-muted mb-2">Navigation Bar</h6>
+                <div id="preview-navbar" class="text-white rounded p-2 mb-3 d-flex align-items-center"
+                     style="background-color: {{if .Data.Config.PrimaryColor}}{{.Data.Config.PrimaryColor}}{{else}}#2c5282{{end}};">
+                    <span id="preview-logo"><i class="bi bi-shield-lock me-2"></i></span>
+                    <span id="preview-abbr" class="fw-bold">{{.Data.Config.AppAbbreviation}}</span>
+                </div>
+
+                <h6 class="text-muted mb-2">Page Title</h6>
+                <p class="border rounded p-2 mb-3 font-monospace small" id="preview-title">Dashboard - {{.Data.Config.AppTitle}}</p>
+
+                <h6 class="text-muted mb-2">Footer</h6>
+                <div class="bg-light border rounded p-2 text-center text-muted small">
+                    <a href="https://github.com/hanej/PassPort" target="_blank" rel="noopener noreferrer" class="text-muted text-decoration-none"><i class="bi bi-github me-2"></i>&copy; 2026 PassPort</a><span id="preview-footer-sep">{{if .Data.Config.FooterText}} &mdash; {{end}}</span><span id="preview-footer-text">{{.Data.Config.FooterText}}</span>
+                </div>
+
+                <h6 class="text-muted mt-3 mb-2">Color Swatches</h6>
+                <div class="d-flex gap-2">
+                    <div class="d-flex flex-column align-items-center gap-1">
+                        <div id="swatch-primary" class="rounded border" style="width:40px;height:40px;background-color:{{if .Data.Config.PrimaryColor}}{{.Data.Config.PrimaryColor}}{{else}}#2c5282{{end}};"></div>
+                        <small class="text-muted" style="font-size:0.7rem;">Primary</small>
+                    </div>
+                    <div class="d-flex flex-column align-items-center gap-1">
+                        <div id="swatch-light" class="rounded border" style="width:40px;height:40px;background-color:{{if .Data.Config.PrimaryLightColor}}{{.Data.Config.PrimaryLightColor}}{{else}}#3182ce{{end}};"></div>
+                        <small class="text-muted" style="font-size:0.7rem;">Light</small>
+                    </div>
+                    <div class="d-flex flex-column align-items-center gap-1">
+                        <div class="rounded border d-flex align-items-center justify-content-center"
+                             style="width:40px;height:40px;">
+                            <span id="swatch-sidebar-link" class="fw-semibold" style="font-size:0.7rem;color:{{if .Data.Config.PrimaryColor}}{{.Data.Config.PrimaryColor}}{{else}}#2c5282{{end}};">Nav</span>
+                        </div>
+                        <small class="text-muted" style="font-size:0.7rem;">Sidebar</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const DEFAULT_PRIMARY = '#2c5282';
+const DEFAULT_LIGHT   = '#3182ce';
+
+function updatePreview() {
+    const title = document.getElementById('app_title').value || 'PassPort';
+    const abbr = document.getElementById('app_abbreviation').value || 'PassPort';
+    const footerText = document.getElementById('footer_text').value.trim();
+
+    document.getElementById('preview-abbr').textContent = abbr;
+    document.getElementById('preview-title').textContent = 'Dashboard - ' + title;
+    document.getElementById('preview-footer-sep').innerHTML = footerText ? ' &mdash; ' : '';
+    document.getElementById('preview-footer-text').textContent = footerText;
+}
+
+function previewLogoFile(input) {
+    const logoEl = document.getElementById('preview-logo');
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            logoEl.innerHTML = '<img src="' + e.target.result + '" alt="" height="24" class="me-2">';
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function syncColor(pickerId, textId) {
+    const color = document.getElementById(pickerId).value;
+    document.getElementById(textId).value = color;
+    applyColorPreview();
+}
+
+function syncColorText(textId, pickerId) {
+    const val = document.getElementById(textId).value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+        document.getElementById(pickerId).value = val;
+        applyColorPreview();
+    }
+}
+
+function resetColor(textId, pickerId, defaultVal) {
+    document.getElementById(textId).value = defaultVal;
+    document.getElementById(pickerId).value = defaultVal;
+    applyColorPreview();
+}
+
+function resetAllColors() {
+    resetColor('primary_color', 'primary_color_picker', DEFAULT_PRIMARY);
+    resetColor('primary_light_color', 'primary_light_color_picker', DEFAULT_LIGHT);
+}
+
+function applyColorPreview() {
+    const primaryVal = document.getElementById('primary_color').value.trim();
+    const lightVal   = document.getElementById('primary_light_color').value.trim();
+
+    const primary = /^#[0-9a-fA-F]{6}$/.test(primaryVal) ? primaryVal : document.getElementById('primary_color_picker').value;
+    const light   = /^#[0-9a-fA-F]{6}$/.test(lightVal)   ? lightVal   : document.getElementById('primary_light_color_picker').value;
+
+    document.getElementById('preview-navbar').style.backgroundColor = primary;
+    document.getElementById('swatch-primary').style.backgroundColor = primary;
+    document.getElementById('swatch-light').style.backgroundColor = light;
+    document.getElementById('swatch-sidebar-link').style.color = primary;
+}
+</script>
+{{end}}

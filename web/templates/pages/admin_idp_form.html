@@ -1,0 +1,393 @@
+{{define "title"}}{{if eq .Data.Mode "edit"}}Edit{{else}}Add{{end}} Identity Provider - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/admin/idp">Identity Providers</a></li>
+            <li class="breadcrumb-item active">{{if eq .Data.Mode "edit"}}Edit: {{.Data.IDP.FriendlyName}}{{else}}Add Provider{{end}}</li>
+        </ol>
+    </nav>
+    <h3><i class="bi bi-diagram-3 me-2"></i>{{if eq .Data.Mode "edit"}}Edit{{else}}Add{{end}} Identity Provider</h3>
+</div>
+
+<form method="POST" action="{{if eq .Data.Mode "edit"}}/admin/idp/{{.Data.IDP.ID}}{{else}}/admin/idp{{end}}" id="idp-form"
+      enctype="multipart/form-data"
+      data-saved-source-attr="{{if eq .Data.Mode "edit"}}{{.Data.Rule.SourceCanonicalAttr}}{{end}}"
+      {{if and (eq .Data.Mode "edit") .Data.Mappings}}data-saved-dir-attrs="{{range $i, $m := .Data.Mappings}}{{if $i}},{{end}}{{$m.DirectoryAttr}}{{end}}"{{end}}>
+    {{.CSRFField}}
+
+    <!-- Basic Information -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Basic Information</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="idp_id" class="form-label">Provider ID (slug)</label>
+                    <input type="text" class="form-control" id="idp_id" name="id"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.ID}}{{end}}"
+                           {{if eq .Data.Mode "edit"}}readonly{{end}}
+                           required pattern="[a-z0-9-]+" placeholder="e.g., corp-ad">
+                    <div class="form-text">Lowercase letters, numbers, and hyphens only.</div>
+                </div>
+                <div class="col-md-4">
+                    <label for="friendly_name" class="form-label">Friendly Name</label>
+                    <input type="text" class="form-control" id="friendly_name" name="friendly_name"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.FriendlyName}}{{end}}"
+                           required placeholder="e.g., Corporate Active Directory">
+                </div>
+                <div class="col-md-4">
+                    <label for="idp_type" class="form-label">Type</label>
+                    <select class="form-select" id="idp_type" name="provider_type" required>
+                        <option value="">Select type...</option>
+                        <option value="ad" {{if and (eq .Data.Mode "edit") (eq .Data.IDP.ProviderType "ad")}}selected{{end}}>Active Directory</option>
+                        <option value="freeipa" {{if and (eq .Data.Mode "edit") (eq .Data.IDP.ProviderType "freeipa")}}selected{{end}}>FreeIPA</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <label for="description" class="form-label">Description</label>
+                    <input type="text" class="form-control" id="description" name="description"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.Description}}{{end}}"
+                           placeholder="Brief description of this provider">
+                </div>
+                <div class="col-12">
+                    <label for="logo_file" class="form-label">Logo</label>
+                    {{if and (eq .Data.Mode "edit") .Data.IDP.LogoURL}}
+                    <div class="mb-2 d-flex align-items-center gap-3" id="current-logo-preview">
+                        <img src="{{.Data.IDP.LogoURL}}" alt="Current logo" height="32" class="border rounded p-1">
+                        <span class="text-muted small">Current logo</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('remove_logo').value='1'; document.getElementById('current-logo-preview').classList.add('d-none');">
+                            <i class="bi bi-trash me-1"></i>Remove
+                        </button>
+                    </div>
+                    {{end}}
+                    <input type="hidden" id="remove_logo" name="remove_logo" value="">
+                    <input type="file" class="form-control" id="logo_file" name="logo_file"
+                           accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico">
+                    <div class="form-text">Upload a logo for this provider. Displayed on the login page.</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="mfa_provider_id" class="form-label">MFA Provider</label>
+                    <select class="form-select" id="mfa_provider_id" name="mfa_provider_id">
+                        {{if ne "" .Data.DefaultMFAID}}
+                        <option value="" {{if eq "" .Data.CurrentMFAID}}selected{{end}}>Use Default{{if ne "" .Data.DefaultMFAName}} ({{.Data.DefaultMFAName}}){{end}}</option>
+                        {{else}}
+                        <option value="" {{if eq "" .Data.CurrentMFAID}}selected{{end}}>None</option>
+                        {{end}}
+                        {{range .Data.MFAProviders}}
+                        {{if .Enabled}}
+                        <option value="{{.ID}}" {{if eq .ID $.Data.CurrentMFAID}}selected{{end}}>
+                            {{.Name}} ({{.ProviderType}})
+                        </option>
+                        {{end}}
+                        {{end}}
+                    </select>
+                    <div class="form-text">Which MFA provider to require for this IDP. "Use Default" defers to the global default.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Settings -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-plug me-2"></i>Connection Settings</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="endpoint" class="form-label">Endpoint (host:port)</label>
+                    <input type="text" class="form-control" id="endpoint" name="endpoint"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.Endpoint}}{{end}}"
+                           required placeholder="e.g., ldap.example.com:636">
+                </div>
+                <div class="col-md-6">
+                    <label for="protocol" class="form-label">Protocol</label>
+                    <select class="form-select" id="protocol" name="protocol" required>
+                        <option value="ldap" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "ldap")}}selected{{end}}>LDAP</option>
+                        <option value="ldaps" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "ldaps")}}selected{{end}}>LDAPS</option>
+                        <option value="starttls" {{if and (eq .Data.Mode "edit") (eq .Data.Config.Protocol "starttls")}}selected{{end}}>STARTTLS</option>
+                    </select>
+                </div>
+                <div class="col-md-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tls_skip_verify" name="tls_skip_verify"
+                               {{if and (eq .Data.Mode "edit") .Data.Config.TLSSkipVerify}}checked{{end}}>
+                        <label class="form-check-label" for="tls_skip_verify">
+                            Skip TLS certificate verification
+                            <small class="text-muted">(required for self-signed or internal CA certificates)</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label for="base_dn" class="form-label">Base DN</label>
+                    <input type="text" class="form-control" id="base_dn" name="base_dn"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.BaseDN}}{{end}}"
+                           required placeholder="dc=example,dc=com">
+                </div>
+                <div class="col-md-4">
+                    <label for="user_search_base" class="form-label">User Search Base</label>
+                    <input type="text" class="form-control" id="user_search_base" name="user_search_base"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.UserSearchBase}}{{end}}"
+                           placeholder="ou=Users,dc=example,dc=com">
+                </div>
+                <div class="col-md-4">
+                    <label for="group_search_base" class="form-label">Group Search Base</label>
+                    <input type="text" class="form-control" id="group_search_base" name="group_search_base"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.GroupSearchBase}}{{end}}"
+                           placeholder="ou=Groups,dc=example,dc=com">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Account -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Service Account</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="svc_username" class="form-label">Username (Bind DN)</label>
+                    <input type="text" class="form-control" id="svc_username" name="service_account_username"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Secrets.ServiceAccountUsername}}{{end}}"
+                           required placeholder="cn=svc-passport,ou=Service Accounts,dc=example,dc=com">
+                </div>
+                <div class="col-md-6">
+                    <label for="svc_password" class="form-label">Password</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control password-field" id="svc_password" name="service_account_password"
+                               {{if not (eq .Data.Mode "edit")}}required{{end}}
+                               placeholder="{{if eq .Data.Mode "edit"}}Leave blank to keep current{{else}}Service account password{{end}}">
+                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="svc_password">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Settings</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="timeout" class="form-label">Timeout (seconds)</label>
+                    <input type="number" class="form-control" id="timeout" name="timeout"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.Timeout}}{{else}}10{{end}}"
+                           min="1" max="120">
+                </div>
+                <div class="col-md-3">
+                    <label for="retry_count" class="form-label">Retry Count</label>
+                    <input type="number" class="form-control" id="retry_count" name="retry_count"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.RetryCount}}{{else}}3{{end}}"
+                           min="0" max="10">
+                </div>
+                <div class="col-md-6">
+                    <label for="password_hint" class="form-label">
+                        Password Complexity Hint
+                        <button type="button"
+                                class="btn btn-link btn-sm p-0 ms-1 align-baseline markdown-help-btn"
+                                data-bs-toggle="popover"
+                                data-bs-trigger="hover focus"
+                                data-bs-placement="top"
+                                data-bs-html="true"
+                                data-bs-title="Markdown Syntax"
+                                data-bs-content="&lt;code&gt;**bold**&lt;/code&gt; &amp;nbsp; &lt;code&gt;*italic*&lt;/code&gt;&lt;br&gt;&lt;code&gt;- item&lt;/code&gt; bullet list&lt;br&gt;&lt;code&gt;1. item&lt;/code&gt; numbered list&lt;br&gt;&lt;code&gt;&amp;lt;u&amp;gt;text&amp;lt;/u&amp;gt;&lt;/code&gt; underline&lt;br&gt;&lt;code&gt;&amp;amp;nbsp;&lt;/code&gt; extra space&lt;br&gt;&lt;br&gt;&lt;a href=&quot;https://www.markdownguide.org/basic-syntax/&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Full syntax reference ↗&lt;/a&gt;"
+                                aria-label="Markdown syntax help">
+                            <i class="bi bi-question-circle text-muted"></i>
+                        </button>
+                    </label>
+                    <textarea class="form-control" id="password_hint" name="password_complexity_hint"
+                              rows="4" placeholder="e.g.,&#10;**Minimum 8 characters** including:&#10;- 1 uppercase letter (A–Z)&#10;- 1 number (0–9)&#10;- 1 special character">{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordComplexityHint}}{{end}}</textarea>
+                    <div class="form-text">Supports Markdown. Displayed to users when changing their password.</div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Random Password Policy</label>
+                    <div class="row g-2 align-items-end" id="pw-policy-group">
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_uppercase"
+                                       name="password_allow_uppercase"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowUppercase}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_uppercase">Uppercase (A–Z)</label>
+                            </div>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_lowercase"
+                                       name="password_allow_lowercase"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowLowercase}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_lowercase">Lowercase (a–z)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_digits"
+                                       name="password_allow_digits"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowDigits}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_digits">Digits (0–9)</label>
+                            </div>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input pw-policy-check" type="checkbox" id="password_allow_special"
+                                       name="password_allow_special"
+                                       {{if or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars}}checked{{end}}>
+                                <label class="form-check-label" for="password_allow_special">Special Characters</label>
+                            </div>
+                            <div id="pw-policy-error" class="text-danger small mt-1 d-none">
+                                At least one character class must be enabled.
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="password_special_chars" class="form-label">Allowed Special Characters</label>
+                            <input type="text" class="form-control" id="password_special_chars"
+                                   name="password_special_chars"
+                                   value="{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordSpecialChars}}{{else}}!@#$%^&amp;(){{end}}"
+                                   placeholder="Leave blank for none"
+                                   {{if not (or (eq .Data.Mode "create") .Data.Config.PasswordAllowSpecialChars)}}disabled{{end}}>
+                        </div>
+                        <div class="col-md-2">
+                            <label for="password_length" class="form-label">Password Length</label>
+                            <input type="number" class="form-control" id="password_length"
+                                   name="password_length" maxlength="2"
+                                   value="{{if and (eq .Data.Mode "edit") (gt .Data.Config.PasswordLength 0)}}{{.Data.Config.PasswordLength}}{{else}}16{{end}}"
+                                   min="1" max="99">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Settings -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-bell me-2"></i>Email Notification</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="notify_enabled" name="send_notification"
+                               {{if and (eq .Data.Mode "edit") .Data.Config.SendNotification}}checked{{end}}>
+                        <label class="form-check-label" for="notify_enabled">Enable email notification on password change</label>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <label for="notify_email_attr" class="form-label">Email Attribute Name</label>
+                    <input type="text" class="form-control" id="notify_email_attr" name="notification_email_attr"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.NotificationEmailAttr}}{{else}}mail{{end}}"
+                           placeholder="mail">
+                    <div class="form-text">The LDAP attribute containing the user's email address.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attribute Mappings -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-arrows-angle-contract me-2"></i>Attribute Mappings</h5>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="add-attr-mapping">
+                <i class="bi bi-plus-lg me-1"></i>Add Mapping
+            </button>
+        </div>
+        <div class="card-body">
+            <table class="table table-sm" id="attr-mappings-table">
+                <thead>
+                    <tr>
+                        <th>Canonical Name</th>
+                        <th>Directory Attribute</th>
+                        <th style="width: 60px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="attr-mappings-body">
+                    {{if and (eq .Data.Mode "edit") .Data.Mappings}}
+                    {{range $i, $m := .Data.Mappings}}
+                    <tr class="attr-mapping-row">
+                        <td>
+                            <select class="form-select form-select-sm canonical-name-select" name="canonical_name[]">
+                                <option value="">Select...</option>
+                                <option value="username" {{if eq $m.CanonicalName "username"}}selected{{end}}>username</option>
+                                <option value="email" {{if eq $m.CanonicalName "email"}}selected{{end}}>email</option>
+                                <option value="display_name" {{if eq $m.CanonicalName "display_name"}}selected{{end}}>display_name</option>
+                                <option value="first_name" {{if eq $m.CanonicalName "first_name"}}selected{{end}}>first_name</option>
+                                <option value="last_name" {{if eq $m.CanonicalName "last_name"}}selected{{end}}>last_name</option>
+                                <option value="employee_id" {{if eq $m.CanonicalName "employee_id"}}selected{{end}}>employee_id</option>
+                                <option value="department" {{if eq $m.CanonicalName "department"}}selected{{end}}>department</option>
+                                <option value="title" {{if eq $m.CanonicalName "title"}}selected{{end}}>title</option>
+                                <option value="phone" {{if eq $m.CanonicalName "phone"}}selected{{end}}>phone</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm directory-attr-select" name="directory_attr[]">
+                                <option value="">Select...</option>
+                            </select>
+                        </td>
+                        <td><button type="button" class="btn btn-sm btn-outline-danger remove-attr-mapping"><i class="bi bi-x"></i></button></td>
+                    </tr>
+                    {{end}}
+                    {{end}}
+                </tbody>
+            </table>
+            <div class="text-muted small">Map canonical attribute names to directory-specific attributes.</div>
+        </div>
+    </div>
+
+    <!-- Correlation Rule -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-link me-2"></i>Correlation Rule</h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                When a user logs in via another provider, the correlation engine looks up their canonical attribute value
+                and searches this provider's directory for a matching account. Both providers must have an attribute mapping
+                for the selected canonical attribute.
+            </p>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="corr_source_attr" class="form-label">Match on Canonical Attribute</label>
+                    <select class="form-select" id="corr_source_attr" name="source_canonical_attr">
+                        <option value="">None (no auto-correlation)</option>
+                    </select>
+                    <div class="form-text">Both providers must map this canonical attribute in their attribute mappings above.</div>
+                </div>
+                <div class="col-md-6">
+                    <label for="corr_match_mode" class="form-label">Match Mode</label>
+                    <select class="form-select" id="corr_match_mode" name="match_mode">
+                        <option value="exact" {{if and (eq .Data.Mode "edit") (eq .Data.Rule.MatchMode "exact")}}selected{{end}}>Exact</option>
+                        <option value="case_insensitive" {{if and (eq .Data.Mode "edit") (eq .Data.Rule.MatchMode "case_insensitive")}}selected{{end}}>Case Insensitive</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="d-flex justify-content-between mb-4">
+        <div>
+            <button type="button" class="btn btn-outline-info" id="test-connection-btn">
+                <i class="bi bi-plug me-1"></i>Test Connection
+            </button>
+            {{if eq .Data.Mode "edit"}}
+            <a href="/admin/idp/{{.Data.IDP.ID}}/expiration" class="btn btn-outline-warning">
+                <i class="bi bi-clock-history me-1"></i>Password Expiration
+            </a>
+            {{end}}
+            <span id="test-connection-result" class="ms-2"></span>
+        </div>
+        <div>
+            <a href="/admin/idp" class="btn btn-outline-secondary me-2">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i>{{if eq .Data.Mode "edit"}}Save Changes{{else}}Create Provider{{end}}
+            </button>
+        </div>
+    </div>
+</form>
+{{end}}

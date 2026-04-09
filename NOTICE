@@ -1,0 +1,60 @@
+PassPort
+Copyright 2026 Jason Hane
+
+This product includes software developed by:
+
+THIRD-PARTY LICENSES
+====================
+
+1. chi/v5 (github.com/go-chi/chi/v5)
+   License: MIT
+   Copyright: go-chi contributors
+   https://github.com/go-chi/chi
+
+2. ldap/v3 (github.com/go-ldap/ldap/v3)
+   License: MIT
+   Copyright: go-ldap contributors
+   https://github.com/go-ldap/ldap
+
+3. csrf (github.com/gorilla/csrf)
+   License: BSD 3-Clause
+   Copyright: gorilla/csrf contributors
+   https://github.com/gorilla/csrf
+
+4. goldmark (github.com/yuin/goldmark)
+   License: MIT
+   Copyright: Yuin Kudo
+   https://github.com/yuin/goldmark
+
+5. crypto (golang.org/x/crypto)
+   License: BSD 3-Clause
+   Copyright: The Go Authors
+   https://golang.org/x/crypto
+
+6. yaml.v3 (gopkg.in/yaml.v3)
+   License: MIT (Go code) + Apache 2.0 (C code)
+   Copyright: Canonical Ltd. and yaml.v3 contributors
+   https://gopkg.in/yaml.v3
+
+7. sqlite (modernc.org/sqlite)
+   License: BSD 3-Clause
+   Copyright: modernc.org contributors
+   https://modernc.org/sqlite
+
+8. go-ntlmssp (github.com/Azure/go-ntlmssp)
+   License: MIT
+   Copyright: Microsoft Corporation
+   https://github.com/Azure/go-ntlmssp
+
+9. duo_universal_golang (github.com/duosecurity/duo_universal_golang)
+   License: BSD 3-Clause
+   Copyright: Duo Security, Inc.
+   https://github.com/duosecurity/duo_universal_golang
+
+10. cron/v3 (github.com/robfig/cron/v3)
+    License: MIT
+    Copyright: Rob Figueiredo
+    https://github.com/robfig/cron
+
+For complete license text of each dependency, refer to the LICENSE file
+in the respective project repositories listed above.

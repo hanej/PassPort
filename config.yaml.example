@@ -1,0 +1,53 @@
+# PassPort — Self-Service Password Management
+# Startup configuration. All other settings are managed via the Admin UI.
+
+server:
+  # Address to listen on (e.g., ":8080", "0.0.0.0:8443")
+  addr: ":8080"
+
+  # TLS certificate and key paths (optional; omit for plain HTTP)
+  # tls_cert: /etc/passport/tls/cert.pem
+  # tls_key: /etc/passport/tls/key.pem
+
+  # Set to true if running behind a reverse proxy that terminates TLS.
+  # This trusts X-Forwarded-Proto to determine if the connection is secure,
+  # and sets the Secure flag on cookies accordingly.
+  trust_proxy: false
+
+  # Time to wait for in-flight requests to complete on shutdown
+  drain_timeout: 15s
+
+database:
+  # Path to SQLite database file
+  path: passport.db
+
+logging:
+  # Stdout logging
+  stdout:
+    format: text    # "json" or "text"
+    level: info     # "debug", "info", "warn", "error"
+
+  # File logging (optional — leave path empty to disable)
+  file:
+    path: ""        # e.g., "passport.log"
+    format: json    # "json" or "text"
+    level: debug    # "debug", "info", "warn", "error"
+
+session:
+  # Session time-to-live
+  ttl: 8h
+
+  # How often to purge expired sessions
+  purge_freq: 5m
+
+audit:
+  # Path to the append-only JSON audit log file (permanent record)
+  file_path: audit.log
+
+  # How long to keep audit entries in the database (for the admin UI viewer).
+  # Entries older than this are automatically purged from the DB.
+  # The file log is never purged. Set to 0 to disable DB purging.
+  db_retention: 720h  # 30 days
+
+  # How often the DB audit purge runs
+  purge_freq: 1h

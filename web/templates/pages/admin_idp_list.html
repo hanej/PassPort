@@ -1,0 +1,93 @@
+{{define "title"}}Identity Providers - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Identity Providers</h3>
+    <a href="/admin/idp/new" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>Add Provider
+    </a>
+</div>
+
+<div id="test-connection-alert" class="alert d-none" role="alert"></div>
+
+{{if .Data.IDPs}}
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>Name</th>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Endpoint</th>
+                <th>Status</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Data.IDPs}}
+            <tr>
+                <td class="fw-semibold">{{.FriendlyName}}</td>
+                <td><code>{{.ID}}</code></td>
+                <td>
+                    {{if eq .ProviderType "ad"}}
+                    <span class="badge badge-ad">Active Directory</span>
+                    {{else}}
+                    <span class="badge badge-freeipa">FreeIPA</span>
+                    {{end}}
+                </td>
+                <td class="text-muted small">{{.Endpoint}}</td>
+                <td>
+                    {{if .Enabled}}
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Enabled</span>
+                    {{else}}
+                    <span class="badge bg-secondary"><i class="bi bi-pause-circle me-1"></i>Disabled</span>
+                    {{end}}
+                </td>
+                <td class="text-end">
+                    <div class="d-inline-flex gap-1">
+                        <a href="/admin/idp/{{.ID}}/edit" class="btn btn-sm btn-outline-primary idp-action-btn"
+                           data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <a href="/admin/idp/{{.ID}}/browse-page" class="btn btn-sm btn-outline-secondary idp-action-btn"
+                           data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Browse Directory">
+                            <i class="bi bi-diagram-3"></i>
+                        </a>
+                        <form method="POST" action="/admin/idp/{{.ID}}/test" class="d-inline test-connection-form">
+                            {{$.CSRFField}}
+                            <button type="submit" class="btn btn-sm btn-outline-info idp-action-btn"
+                                    data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Test Connection">
+                                <i class="bi bi-plug"></i>
+                            </button>
+                        </form>
+                        <form method="POST" action="/admin/idp/{{.ID}}/toggle" class="d-inline">
+                            {{$.CSRFField}}
+                            <button type="submit" class="btn btn-sm btn-outline-{{if .Enabled}}warning{{else}}success{{end}} idp-action-btn"
+                                    data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}'
+                                    title="{{if .Enabled}}Disable{{else}}Enable{{end}}">
+                                <i class="bi bi-{{if .Enabled}}pause{{else}}play{{end}}"></i>
+                            </button>
+                        </form>
+                        <form method="POST" action="/admin/idp/{{.ID}}/delete" class="d-inline"
+                              onsubmit="return confirm('Are you sure you want to delete this provider?');">
+                            {{$.CSRFField}}
+                            <button type="submit" class="btn btn-sm btn-outline-danger idp-action-btn"
+                                    data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle me-2"></i>No identity providers configured yet.
+    <a href="/admin/idp/new" class="alert-link">Add your first provider</a>.
+</div>
+{{end}}
+{{end}}
+

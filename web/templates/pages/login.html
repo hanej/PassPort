@@ -1,0 +1,167 @@
+{{define "title"}}Login - {{(branding).AppTitle}}{{end}}
+
+{{define "content"}}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-xl-6">
+            <div class="text-center mb-4">
+                <h2 class="fw-bold d-inline-flex align-items-center">{{if (branding).LogoURL}}<img src="{{(branding).LogoURL}}" alt="" height="36" class="me-2" style="vertical-align: middle;">{{else}}<i class="bi bi-shield-lock me-2"></i>{{end}}<span>{{(branding).AppSubtitle}}</span></h2>
+                <p class="text-muted">Select an identity provider to sign in</p>
+            </div>
+
+            {{if .Data}}
+            {{with .Data}}
+            <!-- Identity Provider Cards -->
+            <div class="row g-3 mb-4" id="provider-list">
+                {{range .IDPs}}
+                <div class="col-12">
+                    <div class="card idp-card idp-card-{{.ProviderType}} provider-select-card" role="button"
+                         data-provider-id="{{.ID}}" data-provider-name="{{.FriendlyName}}"
+                         data-provider-logo="{{.LogoURL}}">
+                        <div class="card-body d-flex align-items-center">
+                            {{if .LogoURL}}
+                            <img src="{{.LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
+                            {{end}}
+                            <div class="flex-grow-1">
+                                <h5 class="card-title mb-1">{{.FriendlyName}}</h5>
+                                {{if .Description}}
+                                <p class="card-text text-muted small mb-0">{{.Description}}</p>
+                                {{end}}
+                            </div>
+                            <i class="bi bi-chevron-right ms-3 text-muted"></i>
+                        </div>
+                    </div>
+                </div>
+                {{end}}
+
+                <!-- Local Admin Card -->
+                <div class="col-12">
+                    <div class="card idp-card idp-card-local provider-select-card" role="button"
+                         data-provider-id="local" data-provider-name="Local Admin"
+                         data-provider-logo="{{(branding).LogoURL}}">
+                        <div class="card-body d-flex align-items-center">
+                            {{if (branding).LogoURL}}
+                            <img src="{{(branding).LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
+                            {{end}}
+                            <div class="flex-grow-1">
+                                <h5 class="card-title mb-1">Local Admin</h5>
+                                <p class="card-text text-muted small mb-0">Built-in administrator account</p>
+                            </div>
+                            <i class="bi bi-chevron-right ms-3 text-muted"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {{end}}
+            {{end}}
+
+            <!-- Login Form (hidden by default) -->
+            <div id="login-form-container" class="d-none">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <div class="d-flex align-items-center">
+                            <button type="button" class="btn btn-link text-decoration-none p-0 me-3" id="back-to-providers">
+                                <i class="bi bi-arrow-left"></i> Back
+                            </button>
+                            <h5 class="mb-0" id="login-provider-name">Sign In</h5>
+                        </div>
+                    </div>
+                    <div class="card-body p-4">
+                        <div id="login-provider-logo" class="text-center mb-3 d-none">
+                            <img id="login-provider-logo-img" src="" alt="" height="48">
+                        </div>
+                        <form method="POST" action="/login">
+                            {{.CSRFField}}
+                            <input type="hidden" name="provider_id" id="login-provider-id" value="">
+
+                            <div class="mb-3">
+                                <label for="username" class="form-label">Username</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                    <input type="text" class="form-control" id="username" name="username"
+                                           required autofocus placeholder="Enter your username">
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="password" class="form-label">Password</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                                    <input type="password" class="form-control password-field" id="password"
+                                           name="password" required placeholder="Enter your password">
+                                    <button class="btn btn-outline-secondary toggle-password" type="button"
+                                            data-target="password">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+                            </button>
+                        </form>
+
+                        <div class="text-center mt-3">
+                            <a href="/forgot-password" id="forgot-password-link" class="text-decoration-none text-muted">
+                                <i class="bi bi-key me-1"></i>Forgot Password?
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const providerList = document.getElementById('provider-list');
+    const formContainer = document.getElementById('login-form-container');
+    const providerIdInput = document.getElementById('login-provider-id');
+    const providerNameEl = document.getElementById('login-provider-name');
+    const logoContainer = document.getElementById('login-provider-logo');
+    const logoImg = document.getElementById('login-provider-logo-img');
+    const backBtn = document.getElementById('back-to-providers');
+
+    const forgotPasswordLink = document.getElementById('forgot-password-link');
+
+    document.querySelectorAll('.provider-select-card').forEach(function(card) {
+        card.addEventListener('click', function() {
+            const providerId = this.dataset.providerId;
+            const providerName = this.dataset.providerName;
+            const providerLogo = this.dataset.providerLogo;
+            providerIdInput.value = providerId;
+            providerNameEl.textContent = 'Sign in to ' + providerName;
+
+            if (providerLogo) {
+                logoImg.src = providerLogo;
+                logoContainer.classList.remove('d-none');
+            } else {
+                logoContainer.classList.add('d-none');
+            }
+
+            providerList.classList.add('d-none');
+            formContainer.classList.remove('d-none');
+            document.getElementById('username').focus();
+
+            if (forgotPasswordLink) {
+                forgotPasswordLink.href = '/forgot-password?idp_id=' + encodeURIComponent(providerId);
+            }
+        });
+    });
+
+    if (backBtn) {
+        backBtn.addEventListener('click', function() {
+            formContainer.classList.add('d-none');
+            providerList.classList.remove('d-none');
+            providerIdInput.value = '';
+            logoContainer.classList.add('d-none');
+            if (forgotPasswordLink) {
+                forgotPasswordLink.href = '/forgot-password';
+            }
+        });
+    }
+});
+</script>
+{{end}}
+

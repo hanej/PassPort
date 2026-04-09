@@ -1,0 +1,104 @@
+{{define "title"}}SMTP Settings - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <h3><i class="bi bi-envelope me-2"></i>SMTP Settings</h3>
+    <p class="text-muted">Configure the email server used for password change notifications.</p>
+</div>
+
+<form method="POST" action="/admin/smtp" id="smtp-form">
+    {{.CSRFField}}
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Mail Server Configuration</h5>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="smtp_enabled" name="enabled"
+                       {{if .Data.Config.Enabled}}checked{{end}}>
+                <label class="form-check-label" for="smtp_enabled">Enabled</label>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label for="smtp_host" class="form-label">SMTP Host</label>
+                    <input type="text" class="form-control" id="smtp_host" name="host"
+                           value="{{.Data.Config.Host}}" placeholder="smtp.example.com">
+                </div>
+                <div class="col-md-4">
+                    <label for="smtp_port" class="form-label">Port</label>
+                    <input type="number" class="form-control" id="smtp_port" name="port"
+                           value="{{.Data.Config.Port}}" placeholder="587" min="1" max="65535">
+                </div>
+                <div class="col-md-6">
+                    <label for="smtp_username" class="form-label">Username</label>
+                    <input type="text" class="form-control" id="smtp_username" name="username"
+                           value="{{.Data.Secrets.Username}}" placeholder="SMTP username">
+                </div>
+                <div class="col-md-6">
+                    <label for="smtp_password" class="form-label">Password</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control password-field" id="smtp_password" name="password"
+                               placeholder="{{if .Data.Config.Host}}Leave blank to keep current{{else}}SMTP password{{end}}">
+                        <button class="btn btn-outline-secondary toggle-password" type="button" data-target="smtp_password">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label for="smtp_from_address" class="form-label">From Address</label>
+                    <input type="email" class="form-control" id="smtp_from_address" name="from_address"
+                           value="{{.Data.Config.FromAddress}}" placeholder="noreply@example.com">
+                </div>
+                <div class="col-md-6">
+                    <label for="smtp_from_name" class="form-label">From Name</label>
+                    <input type="text" class="form-control" id="smtp_from_name" name="from_name"
+                           value="{{.Data.Config.FromName}}" placeholder="PassPort Notification">
+                </div>
+                <div class="col-md-6">
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="smtp_use_tls" name="use_tls"
+                               {{if .Data.Config.UseTLS}}checked{{end}}>
+                        <label class="form-check-label" for="smtp_use_tls">Use TLS (implicit)</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="smtp_use_starttls" name="use_starttls"
+                               {{if .Data.Config.UseStartTLS}}checked{{end}}>
+                        <label class="form-check-label" for="smtp_use_starttls">Use STARTTLS</label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="smtp_skip_verify" name="tls_skip_verify"
+                               {{if .Data.Config.TLSSkipVerify}}checked{{end}}>
+                        <label class="form-check-label" for="smtp_skip_verify">
+                            Skip TLS certificate verification
+                            <small class="text-muted">(required for self-signed or internal CA certificates)</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-end">
+        <div class="d-flex align-items-end gap-2">
+            <div>
+                <label for="test-email-addr" class="form-label form-label-sm mb-1">Recipient</label>
+                <input type="email" class="form-control form-control-sm" id="test-email-addr"
+                       placeholder="user@example.com" style="width: 250px;">
+            </div>
+            <button type="button" class="btn btn-outline-info btn-sm" id="test-smtp-btn">
+                <i class="bi bi-send me-1"></i>Send Test Email
+            </button>
+            <span id="smtp-test-result" class="ms-2 small"></span>
+        </div>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Save Settings
+        </button>
+    </div>
+</form>
+{{end}}
+

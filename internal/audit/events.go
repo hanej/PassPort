@@ -1,0 +1,39 @@
+// Package audit provides structured audit event logging.
+package audit
+
+// Event type constants for all auditable actions.
+const (
+	ActionLogin                  = "login"
+	ActionLogout                 = "logout"
+	ActionPasswordChange         = "password_change"
+	ActionPasswordReset          = "password_reset"
+	ActionAccountUnlock          = "account_unlock"
+	ActionAccountEnable          = "account_enable"
+	ActionIDPCreate              = "idp_create"
+	ActionIDPUpdate              = "idp_update"
+	ActionIDPDelete              = "idp_delete"
+	ActionIDPToggle              = "idp_toggle"
+	ActionIDPTestConnection      = "idp_test_connection"
+	ActionSMTPUpdate             = "smtp_update"
+	ActionSMTPTest               = "smtp_test"
+	ActionAdminGroupAdd          = "admin_group_add"
+	ActionAdminGroupDelete       = "admin_group_delete"
+	ActionLinkAuto               = "link_auto"
+	ActionLinkManual             = "link_manual"
+	ActionLinkFailed             = "link_failed"
+	ActionMappingReset           = "mapping_reset"
+	ActionMappingResetAll        = "mapping_reset_all"
+	ActionAdminPasswordChange    = "admin_password_change"
+	ActionMFACreate              = "mfa_create"
+	ActionMFAUpdate              = "mfa_update"
+	ActionMFADelete              = "mfa_delete"
+	ActionMFAToggle              = "mfa_toggle"
+	ActionMFAVerify              = "mfa_verify"
+	ActionEmailTemplateUpdate    = "email_template_update"
+	ActionEmailTemplateReset     = "email_template_reset"
+	ActionExpirationNotification = "expiration_notification"
+	ActionExpirationConfigUpdate = "expiration_config_update"
+
+	ResultSuccess = "success"
+	ResultFailure = "failure"
+)
