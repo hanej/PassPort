@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(context.Background()); err != nil {
 		t.Fatalf("running migrations: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -84,8 +84,7 @@ func TestReadiness_DBUnreachable(t *testing.T) {
 	h := NewHealthHandler(database, testLogger())
 
 	// Close the database to simulate an unreachable DB.
-	database.Close()
-
+	_ = database.Close()
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 
@@ -115,7 +114,7 @@ func TestReadiness_MigrationsCheckError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening memory db: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	h := NewHealthHandler(database, testLogger())
 

@@ -122,13 +122,13 @@ func setupLoginTest(t *testing.T) *loginTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewLoginHandler(database, sm, registry, correlator, cryptoSvc, renderer, auditLog, logger)
 
@@ -825,13 +825,13 @@ func TestShowLogin_DBError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewLoginHandler(mockStore, sm, registry, &mockCorrelator{}, nil, renderer, auditLog, logger)
 
@@ -903,13 +903,13 @@ func TestLoginProvider_UpsertMappingError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewLoginHandler(mockStore, sm, registry, &mockCorrelator{}, nil, renderer, auditLog, logger)
 
@@ -997,12 +997,12 @@ func newMockLoginHandler(t *testing.T, store db.Store, baseDB *db.DB) *LoginHand
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(baseDB, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -1333,12 +1333,12 @@ func TestShouldEnforceMFA_HealthCheckFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewLoginHandler(mockStore, sm, registry, &mockCorrelator{}, cryptoSvc, renderer, auditLog, logger)
 	if h.shouldEnforceMFAOnLogin(context.Background(), "test-idp") {

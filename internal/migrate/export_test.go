@@ -22,7 +22,7 @@ func openTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(context.Background()); err != nil {
 		t.Fatalf("running migrations: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 

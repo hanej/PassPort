@@ -33,7 +33,7 @@ func (d *DB) queryIDPs(ctx context.Context, query string, args ...any) ([]Identi
 	if err != nil {
 		return nil, fmt.Errorf("querying identity providers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []IdentityProviderRecord
 	for rows.Next() {
@@ -220,7 +220,7 @@ func (d *DB) ListAttributeMappings(ctx context.Context, idpID string) ([]Attribu
 	if err != nil {
 		return nil, fmt.Errorf("querying attribute mappings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []AttributeMapping
 	for rows.Next() {
@@ -254,7 +254,7 @@ func (d *DB) SetAttributeMappings(ctx context.Context, idpID string, mappings []
 	if err != nil {
 		return fmt.Errorf("preparing insert statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, m := range mappings {
 		if _, err := stmt.ExecContext(ctx, idpID, m.CanonicalName, m.DirectoryAttr); err != nil {

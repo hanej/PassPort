@@ -12,7 +12,7 @@ func TestNewRotatableFile_WriteAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRotatableFile: %v", err)
 	}
-	defer rf.Close()
+	defer func() { _ = rf.Close() }()
 
 	n, err := rf.Write([]byte("hello"))
 	if err != nil {
@@ -38,7 +38,7 @@ func TestRotatableFile_Reopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRotatableFile: %v", err)
 	}
-	defer rf.Close()
+	defer func() { _ = rf.Close() }()
 
 	if _, err := rf.Write([]byte("before")); err != nil {
 		t.Fatalf("Write before reopen: %v", err)
@@ -85,7 +85,7 @@ func TestRotatableFile_WriteConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRotatableFile: %v", err)
 	}
-	defer rf.Close()
+	defer func() { _ = rf.Close() }()
 
 	// Concurrent writes should not race.
 	done := make(chan struct{})
@@ -107,8 +107,7 @@ func TestRotatableFile_Reopen_CloseError(t *testing.T) {
 		t.Fatalf("NewRotatableFile: %v", err)
 	}
 	// Close the underlying file directly to make the next Close() call fail.
-	rf.file.Close()
-
+	_ = rf.file.Close()
 	// Reopen should return an error because the file is already closed.
 	if err := rf.Reopen(); err == nil {
 		t.Error("expected error when Reopen called with already-closed file")
@@ -122,7 +121,7 @@ func TestRotatableFile_Reopen_OpenFileError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRotatableFile: %v", err)
 	}
-	defer rf.file.Close() // final cleanup if anything goes wrong
+	defer func() { _ = rf.file.Close() }() // final cleanup if anything goes wrong
 
 	// Remove the directory so that OpenFile fails after we close.
 	if err := rf.file.Close(); err != nil {

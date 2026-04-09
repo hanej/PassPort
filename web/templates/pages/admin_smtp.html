@@ -100,5 +100,18 @@
         </button>
     </div>
 </form>
+
+<script>
+(function() {
+    var form = document.getElementById('smtp-form');
+    var dirty = false;
+    form.addEventListener('change', function() { dirty = true; });
+    form.addEventListener('input', function() { dirty = true; });
+    form.addEventListener('submit', function() { dirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+})();
+</script>
 {{end}}
 

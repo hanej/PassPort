@@ -49,7 +49,7 @@ func (c *Connector) bindAsService(ctx context.Context) (idp.LDAPConn, error) {
 		return nil, fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
 	if err := conn.Bind(c.secrets.ServiceAccountUsername, c.secrets.ServiceAccountPassword); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("service account bind failed: %w", err)
 	}
 	c.logger.Debug("service account bind successful")
@@ -67,7 +67,7 @@ func (c *Connector) TestConnection(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn.Close()
+	_ = conn.Close()
 	c.logger.Info("test connection successful")
 	return nil
 }
@@ -81,7 +81,7 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 		c.logger.Debug("connection failed during authenticate", "user", user, "error", err)
 		return fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	userDN := c.buildUserDN(user)
 	c.logger.Debug("binding as user", "user_dn", userDN)
@@ -104,7 +104,7 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 	if err != nil {
 		return fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	userDN := c.buildUserDN(user)
 
@@ -133,7 +133,7 @@ func (c *Connector) ResetPassword(ctx context.Context, user, newPassword string)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	userDN := c.buildUserDN(user)
 
@@ -157,7 +157,7 @@ func (c *Connector) UnlockAccount(ctx context.Context, user string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	modReq := ldap.NewModifyRequest(userDN, nil)
 	modReq.Replace("nsAccountLock", []string{"FALSE"})
@@ -181,7 +181,7 @@ func (c *Connector) EnableAccount(ctx context.Context, user string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	modReq := ldap.NewModifyRequest(userDN, nil)
 	modReq.Replace("nsAccountLock", []string{"FALSE"})
@@ -206,7 +206,7 @@ func (c *Connector) GetUserGroups(ctx context.Context, user string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	groupBase := c.config.GroupSearchBase
 	if groupBase == "" {
@@ -242,7 +242,7 @@ func (c *Connector) GetGroupMembers(ctx context.Context, groupDN string) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	searchReq := ldap.NewSearchRequest(
 		groupDN,
@@ -271,7 +271,7 @@ func (c *Connector) SearchUser(ctx context.Context, attr, value string) (string,
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	searchBase := c.config.UserSearchBase
 	if searchBase == "" {
@@ -306,7 +306,7 @@ func (c *Connector) GetUserAttribute(ctx context.Context, userDN, attr string) (
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	searchReq := ldap.NewSearchRequest(
 		userDN,

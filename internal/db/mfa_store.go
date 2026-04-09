@@ -265,7 +265,7 @@ func (d *DB) queryMFAProviders(ctx context.Context, query string, args ...any) (
 	if err != nil {
 		return nil, fmt.Errorf("querying mfa providers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []MFAProviderRecord
 	for rows.Next() {

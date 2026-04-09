@@ -102,6 +102,16 @@
 
 <script src="https://cdn.jsdelivr.net/npm/tinymce@6/tinymce.min.js"></script>
 <script>
+var templateDirty = false;
+(function() {
+    var form = document.getElementById('template-form');
+    form.addEventListener('input', function() { templateDirty = true; });
+    form.addEventListener('submit', function() { templateDirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (templateDirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+})();
+
 tinymce.init({
     selector: '#body_html',
     height: 450,
@@ -114,6 +124,7 @@ tinymce.init({
         window.insertVariable = function(variable) {
             editor.insertContent('{{"{{"}}.' + variable + '{{"}}"}}');
         };
+        editor.on('input change', function() { templateDirty = true; });
     }
 });
 

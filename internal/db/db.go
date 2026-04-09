@@ -27,7 +27,7 @@ func Open(path string) (*DB, error) {
 	writer.SetMaxOpenConns(1)
 
 	if err := writer.Ping(); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("pinging writer: %w", err)
 	}
 
@@ -35,14 +35,14 @@ func Open(path string) (*DB, error) {
 	// WAL mode allows readers to see committed writes without blocking.
 	reader, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("opening reader: %w", err)
 	}
 	reader.SetMaxOpenConns(10)
 
 	if err := reader.Ping(); err != nil {
-		writer.Close()
-		reader.Close()
+		_ = writer.Close()
+		_ = reader.Close()
 		return nil, fmt.Errorf("pinging reader: %w", err)
 	}
 
@@ -61,14 +61,14 @@ func OpenMemory() (*DB, error) {
 	writer.SetMaxOpenConns(1)
 
 	if err := writer.Ping(); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("pinging memory db: %w", err)
 	}
 
 	// For in-memory, reader shares the same connection pool
 	reader, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("opening memory reader: %w", err)
 	}
 	reader.SetMaxOpenConns(10)

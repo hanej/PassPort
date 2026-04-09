@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', function () {
     initDryRun();
     initRunNow();
     initPasswordPolicyToggles();
+    initUnsavedChangesWarning();
 
     // Initialize Bootstrap tooltips on elements with data-bs-toggle="tooltip".
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
@@ -953,4 +954,27 @@ function escapeHtml(text) {
     var div = document.createElement('div');
     div.appendChild(document.createTextNode(text));
     return div.innerHTML;
+}
+
+/* ---- Unsaved Changes Warning (Admin IDP Form) ---- */
+
+function initUnsavedChangesWarning() {
+    var form = document.getElementById('idp-form');
+    if (!form) return;
+
+    var dirty = false;
+    form.addEventListener('change', function() { dirty = true; });
+    form.addEventListener('input', function() { dirty = true; });
+    form.addEventListener('submit', function() { dirty = false; });
+
+    // Add/remove attribute mapping rows change form data but don't fire input/change.
+    form.addEventListener('click', function(e) {
+        if (e.target.closest('#add-attr-mapping') || e.target.closest('.remove-attr-mapping')) {
+            dirty = true;
+        }
+    });
+
+    window.addEventListener('beforeunload', function(e) {
+        if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
 }

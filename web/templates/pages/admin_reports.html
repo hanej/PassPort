@@ -1,0 +1,115 @@
+{{define "title"}}Reports - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <h3><i class="bi bi-file-earmark-bar-graph me-2"></i>Reports</h3>
+    <p class="text-muted">Configure automated password expiration reports for each identity provider. Each report type has its own schedule, recipients, and exclusion filters.</p>
+</div>
+
+{{if .Data.Items}}
+<div class="accordion idp-accordion" id="reports-accordion">
+    {{range .Data.Items}}
+    {{$idpID := .IDP.ID}}
+    {{$expirationEnabled := and .Expiration .Expiration.Enabled}}
+    {{$expiredEnabled := and .Expired .Expired.Enabled}}
+    <div class="accordion-item idp-accordion-item idp-card-{{.IDP.ProviderType}}">
+        <h2 class="accordion-header" id="heading-{{$idpID}}">
+            <button class="accordion-button collapsed"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#collapse-{{$idpID}}"
+                    aria-expanded="false"
+                    aria-controls="collapse-{{$idpID}}">
+                <div class="d-flex align-items-center gap-2 flex-wrap flex-grow-1 me-2">
+                    <span class="fw-semibold">{{.IDP.FriendlyName}}</span>
+                    {{if eq .IDP.ProviderType "ad"}}
+                    <span class="badge badge-ad badge-sm">Active Directory</span>
+                    {{else if eq .IDP.ProviderType "freeipa"}}
+                    <span class="badge badge-freeipa badge-sm">FreeIPA</span>
+                    {{else}}
+                    <span class="badge bg-secondary badge-sm">{{.IDP.ProviderType}}</span>
+                    {{end}}
+                    {{if or $expirationEnabled $expiredEnabled}}
+                    <span class="badge bg-success badge-sm ms-auto">
+                        <i class="bi bi-check-circle me-1"></i>{{if and $expirationEnabled $expiredEnabled}}Both reports enabled{{else}}1 report enabled{{end}}
+                    </span>
+                    {{else}}
+                    <span class="badge bg-secondary badge-sm ms-auto">
+                        <i class="bi bi-pause-circle me-1"></i>No reports enabled
+                    </span>
+                    {{end}}
+                </div>
+            </button>
+        </h2>
+        <div id="collapse-{{$idpID}}"
+             class="accordion-collapse collapse"
+             aria-labelledby="heading-{{$idpID}}">
+            <div class="accordion-body p-0">
+                <div class="list-group list-group-flush">
+
+                    <!-- Soon-to-Expire Passwords -->
+                    <div class="list-group-item d-flex align-items-center gap-3 py-3">
+                        <div class="flex-shrink-0 text-warning fs-4">
+                            <i class="bi bi-hourglass-split"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold">Soon-to-Expire Passwords</div>
+                            <div class="text-muted small">Accounts whose passwords are expiring soon.</div>
+                            {{if and .Expiration .Expiration.CronSchedule}}
+                            <div class="text-muted small"><i class="bi bi-clock me-1"></i>{{.Expiration.CronSchedule}}</div>
+                            {{end}}
+                        </div>
+                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                            {{if $expirationEnabled}}
+                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Enabled</span>
+                            {{else}}
+                            <span class="badge bg-secondary"><i class="bi bi-pause-circle me-1"></i>Disabled</span>
+                            {{end}}
+                            <a href="/admin/reports/{{$idpID}}/expiration" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-gear me-1"></i>Configure
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Expired Accounts -->
+                    <div class="list-group-item d-flex align-items-center gap-3 py-3">
+                        <div class="flex-shrink-0 text-danger fs-4">
+                            <i class="bi bi-x-circle"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold">Expired Accounts</div>
+                            <div class="text-muted small">Accounts whose passwords have already expired.</div>
+                            {{if and .Expired .Expired.CronSchedule}}
+                            <div class="text-muted small"><i class="bi bi-clock me-1"></i>{{.Expired.CronSchedule}}</div>
+                            {{end}}
+                        </div>
+                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                            {{if $expiredEnabled}}
+                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Enabled</span>
+                            {{else}}
+                            <span class="badge bg-secondary"><i class="bi bi-pause-circle me-1"></i>Disabled</span>
+                            {{end}}
+                            <a href="/admin/reports/{{$idpID}}/expired" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-gear me-1"></i>Configure
+                            </a>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="card">
+    <div class="card-body text-center text-muted py-5">
+        <i class="bi bi-diagram-3 fs-1 d-block mb-3"></i>
+        <p>No identity providers configured yet.</p>
+        <a href="/admin/idp/new" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Add Identity Provider
+        </a>
+    </div>
+</div>
+{{end}}
+{{end}}

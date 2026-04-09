@@ -79,7 +79,7 @@ func (d *DB) ListLocalAdmins(ctx context.Context) ([]LocalAdmin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing local admins: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var admins []LocalAdmin
 	for rows.Next() {

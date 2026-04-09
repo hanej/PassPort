@@ -1,5 +1,6 @@
 # Binaries
 bin/
+passport
 *.exe
 *.exe~
 *.dll

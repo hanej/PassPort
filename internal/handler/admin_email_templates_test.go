@@ -55,13 +55,12 @@ func setupEmailTemplatesTest(t *testing.T) *emailTemplatesTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminEmailTemplatesHandler(database, renderer, sm, auditLog, logger)
 
@@ -749,12 +748,12 @@ func newEmailTemplatesMockHandler(t *testing.T, database *db.DB, mock *mockEmail
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	return NewAdminEmailTemplatesHandler(mock, renderer, sm, auditLog, logger)
 }
 

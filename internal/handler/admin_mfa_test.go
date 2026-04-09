@@ -65,13 +65,13 @@ func setupMFATest(t *testing.T) *mfaTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminMFAHandler(database, cryptoSvc, renderer, auditLog, logger)
 
@@ -739,12 +739,12 @@ func newMFAMockHandler(t *testing.T, database *db.DB, mock *mockMFAErrStore) *Ad
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	return NewAdminMFAHandler(mock, cryptoSvc, renderer, auditLog, logger)
 }
 
@@ -856,12 +856,12 @@ func newMFAFullMockHandler(t *testing.T, database *db.DB, mock *mockMFAFullStore
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 	return NewAdminMFAHandler(mock, cryptoSvc, renderer, auditLog, logger)
 }
 

@@ -15,7 +15,7 @@ func (d *DB) ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list email templates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var templates []EmailTemplate
 	for rows.Next() {

@@ -2,12 +2,18 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
+	"errors"
 	"html/template"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +21,12 @@ import (
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/mfa"
 )
+
+type alwaysErrReader struct{}
+
+func (alwaysErrReader) Read(_ []byte) (int, error) {
+	return 0, errors.New("forced random read failure")
+}
 
 // ============================================================
 // SearchDirectory — 0% coverage
@@ -309,6 +321,100 @@ func TestShowMFA_DuoProvider_InitiateFailsRedirects(t *testing.T) {
 	// Duo Initiate will fail → redirect to error redirect.
 	if rec.Code != http.StatusFound {
 		t.Errorf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestShowMFA_EmailOTP_InitiateFailure_NonPending(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "email-init-fail")
+	cookies := env.createSession(t, "provider", "corp-ad", "jdoe")
+
+	originalReader := crand.Reader
+	crand.Reader = alwaysErrReader{}
+	t.Cleanup(func() { crand.Reader = originalReader })
+
+	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/dashboard" {
+		t.Fatalf("expected /dashboard redirect, got %s", loc)
+	}
+}
+
+func TestShowMFA_EmailOTP_InitiateFailure_MFAPending(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "email-init-fail-pending")
+	cookies := env.createMFAPendingSession(t, "provider", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+
+	originalReader := crand.Reader
+	crand.Reader = alwaysErrReader{}
+	t.Cleanup(func() { crand.Reader = originalReader })
+
+	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", rec.Code)
+	}
+
+	sess, err := env.db.GetSession(context.Background(), sessID)
+	if err != nil {
+		t.Fatalf("loading session after ShowMFA: %v", err)
+	}
+	if sess.MFAPending {
+		t.Fatalf("expected MFA pending to be cleared on initiate failure")
+	}
+}
+
+func TestResendOTP_EmailOTP_InitiateFailure(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "email-resend-init-fail")
+	cookies := env.createSession(t, "provider", "corp-ad", "jdoe")
+
+	originalReader := crand.Reader
+	crand.Reader = alwaysErrReader{}
+	t.Cleanup(func() { crand.Reader = originalReader })
+
+	rec := env.serveWithSession(t, env.handler.ResendOTP, http.MethodPost, "/mfa/resend-otp", cookies, "")
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/dashboard" {
+		t.Fatalf("expected /dashboard redirect, got %s", loc)
+	}
+}
+
+func TestHandleLogoUpload_SaveFailure(t *testing.T) {
+	env := setupIDPTest(t)
+
+	parent := t.TempDir()
+	notDir := filepath.Join(parent, "not-a-directory")
+	if err := os.WriteFile(notDir, []byte("x"), 0600); err != nil {
+		t.Fatalf("creating blocker file: %v", err)
+	}
+	env.handler.uploadsDir = notDir
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("logo_file", "logo.png")
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := part.Write([]byte("png-bytes")); err != nil {
+		t.Fatalf("writing multipart file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("closing multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	got := env.handler.handleLogoUpload(req, "corp-ad", "/uploads/existing.png")
+	if got != "/uploads/existing.png" {
+		t.Fatalf("expected existing logo URL on save failure, got %s", got)
 	}
 }
 

@@ -36,19 +36,19 @@ func fakeSMTPServer(t *testing.T) (addr string, stop func()) {
 			go serveOneFakeSMTP(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 // serveOneFakeSMTP handles a single SMTP session using a bare-bones protocol.
 func serveOneFakeSMTP(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	w := bufio.NewWriter(conn)
 	r := bufio.NewReader(conn)
 
 	send := func(s string) {
-		fmt.Fprintf(w, "%s\r\n", s)
-		w.Flush()
+		_, _ = fmt.Fprintf(w, "%s\r\n", s)
+		_ = w.Flush()
 	}
 
 	send("220 127.0.0.1 SMTP Service Ready")
@@ -110,11 +110,11 @@ func fakeRejectSMTPServer(t *testing.T, rejectCmd string) (addr string, stop fun
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				w := bufio.NewWriter(c)
 				r := bufio.NewReader(c)
-				send := func(s string) { fmt.Fprintf(w, "%s\r\n", s); w.Flush() }
+				send := func(s string) { _, _ = fmt.Fprintf(w, "%s\r\n", s); _ = w.Flush() }
 				send("220 127.0.0.1 SMTP Service Ready")
 				for {
 					line, err := r.ReadString('\n')
@@ -140,7 +140,7 @@ func fakeRejectSMTPServer(t *testing.T, rejectCmd string) (addr string, stop fun
 			}(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 func TestSendHTML_MailFromError(t *testing.T) {
@@ -322,7 +322,7 @@ func fakeTLSSMTPServer(t *testing.T) (addr string, stop func()) {
 			go serveOneFakeSMTP(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 func TestSendHTML_TLSSuccess(t *testing.T) {
@@ -400,16 +400,16 @@ func fakeBadGreetingTLSServer(t *testing.T) (addr string, stop func()) {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				w := bufio.NewWriter(c)
 				// Send a 554 rejection — smtp.NewClient returns error on non-220.
-				fmt.Fprintf(w, "554 5.3.2 Service not available\r\n")
-				w.Flush()
+				_, _ = fmt.Fprintf(w, "554 5.3.2 Service not available\r\n")
+				_ = w.Flush()
 			}(conn)
 		}
 	}()
-	return ln.Addr().String(), func() { ln.Close(); <-done }
+	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 func TestSendHTML_TLSNewClientError(t *testing.T) {

@@ -136,7 +136,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "failed to open log file %s: %v\n", cfg.Logging.File.Path, err)
 			os.Exit(1)
 		}
-		defer logFile.Close()
+		defer func() { _ = logFile.Close() }()
 
 		fileOpts := &slog.HandlerOptions{Level: slog.Level(cfg.FileLogLevel())}
 		if cfg.Logging.File.Format == "json" {
@@ -177,7 +177,7 @@ func main() {
 		logger.Error("failed to open database", "error", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Run migrations
 	ctx := context.Background()
@@ -281,7 +281,7 @@ func main() {
 		logger.Error("failed to create audit logger", "error", err)
 		os.Exit(1)
 	}
-	defer auditLogger.Close()
+	defer func() { _ = auditLogger.Close() }()
 
 	// Start audit DB purge background goroutine
 	appCtx, appCancel := context.WithCancel(context.Background())
@@ -330,6 +330,9 @@ func main() {
 	expirationNotifier := job.New(database, registry, cryptoSvc, auditLogger, logger)
 	expirationNotifier.Start(appCtx)
 
+	reportScheduler := job.NewReportScheduler(database, registry, cryptoSvc, auditLogger, logger)
+	reportScheduler.Start(appCtx)
+
 	adminExpirationHandler := handler.NewAdminExpirationHandler(database, expirationNotifier, renderer, auditLogger, logger)
 
 	adminMFAHandler := handler.NewAdminMFAHandler(database, cryptoSvc, renderer, auditLogger, logger)
@@ -344,6 +347,7 @@ func main() {
 	adminBrandingHandler := handler.NewAdminBrandingHandler(database, renderer, auditLogger, logger, uploadsDir)
 	adminMigrateHandler := handler.NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	adminDocsHandler := handler.NewAdminDocsHandler(renderer, logger, docs.GuideMarkdown)
+	adminReportsHandler := handler.NewAdminReportsHandler(database, reportScheduler, renderer, auditLogger, logger)
 
 	// Load branding from DB and set it on the renderer so templates use the saved config.
 	brandingCfg, err := database.GetBrandingConfig(ctx)
@@ -370,6 +374,7 @@ func main() {
 		AdminBranding:       adminBrandingHandler,
 		AdminMigrate:        adminMigrateHandler,
 		AdminDocs:           adminDocsHandler,
+		AdminReports:        adminReportsHandler,
 		AdminMFA:            adminMFAHandler,
 		AdminExpiration:     adminExpirationHandler,
 		MFA:                 mfaHandler,

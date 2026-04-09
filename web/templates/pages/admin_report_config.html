@@ -1,0 +1,350 @@
+{{define "title"}}{{.Data.Meta.Title}} – {{.Data.IDP.FriendlyName}} - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/admin/reports">Reports</a></li>
+            <li class="breadcrumb-item active">{{.Data.IDP.FriendlyName}}</li>
+        </ol>
+    </nav>
+    <h3><i class="bi bi-file-earmark-bar-graph me-2"></i>{{.Data.Meta.Title}}</h3>
+    <p class="text-muted">{{.Data.Meta.Description}}</p>
+</div>
+
+<form method="POST" action="/admin/reports/{{.Data.IDP.ID}}/{{.Data.ReportType}}" id="report-config-form">
+    {{.CSRFField}}
+
+    <!-- Configuration -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-gear me-2"></i>Configuration</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="enabled" name="enabled"
+                               {{if .Data.Config.Enabled}}checked{{end}}>
+                        <label class="form-check-label" for="enabled">Enable automated reports</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label for="cron_schedule" class="form-label">Schedule</label>
+                    <input type="text" class="form-control" id="cron_schedule" name="cron_schedule"
+                           value="{{.Data.Config.CronSchedule}}" placeholder="0 7 * * 1">
+                    <div class="form-text">Standard cron format: minute hour day month weekday</div>
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary cron-preset" data-cron="0 7 * * *">Daily 7AM</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary cron-preset" data-cron="0 7 * * 1">Weekly Monday 7AM</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary cron-preset" data-cron="0 7 * * 5">Weekly Friday 7AM</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary cron-preset" data-cron="0 7 1 * *">Monthly 1st 7AM</button>
+                    </div>
+                </div>
+                {{if eq .Data.ReportType "expiration"}}
+                <div class="col-md-6">
+                    <label for="days_before_expiration" class="form-label">Days Before Expiration Threshold</label>
+                    <input type="number" class="form-control" id="days_before_expiration" name="days_before_expiration"
+                           value="{{.Data.Config.DaysBeforeExpiration}}" min="1" max="90">
+                    <div class="form-text">Include accounts expiring within this many days.</div>
+                </div>
+                {{end}}
+                <div class="col-12">
+                    <label for="recipients" class="form-label">Recipients</label>
+                    <textarea class="form-control" id="recipients" name="recipients" rows="2"
+                              placeholder="admin@example.com, helpdesk@example.com">{{.Data.Config.Recipients}}</textarea>
+                    <div class="form-text">Comma-separated email addresses to receive this report.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exclusion Filters -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-funnel me-2"></i>Exclusion Filters</h5>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="add-report-filter">
+                <i class="bi bi-plus-lg me-1"></i>Add Filter
+            </button>
+        </div>
+        <div class="card-body">
+            {{if eq .Data.IDP.ProviderType "ad"}}
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="exclude_disabled" name="exclude_disabled"
+                           {{if .Data.Config.ExcludeDisabled}}checked{{end}}>
+                    <label class="form-check-label" for="exclude_disabled">Exclude disabled accounts</label>
+                </div>
+                <div class="form-text ms-5">Uses a bitwise LDAP filter on <code>userAccountControl</code> to exclude accounts with the disabled bit (0x0002) set.</div>
+            </div>
+            {{end}}
+            <table class="table table-sm" id="report-filters-table"
+                   data-provider-type="{{.Data.IDP.ProviderType}}">
+                <thead>
+                    <tr>
+                        <th>Attribute</th>
+                        <th>Regex Pattern</th>
+                        <th>Description</th>
+                        <th style="width: 60px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="report-filters-body">
+                    {{range .Data.Filters}}
+                    <tr class="report-filter-row">
+                        <td>
+                            <select class="form-select form-select-sm report-filter-attr-select" name="filter_attribute[]"
+                                    data-saved-value="{{.Attribute}}">
+                                <option value="">Select...</option>
+                            </select>
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" name="filter_pattern[]"
+                                   value="{{.Pattern}}" placeholder="e.g., OU=Service Accounts">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm" name="filter_description[]"
+                                   value="{{.Description}}" placeholder="e.g., Exclude service accounts">
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-danger remove-report-filter">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            <div class="text-muted small">Users matching any filter will be excluded from this report. Use <code>distinguishedName</code> to filter by DN path.</div>
+        </div>
+    </div>
+
+    <!-- Email Template -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Email Template</h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Customize the email template for this report. If no custom template is set, the global default is used.
+            </p>
+            <a href="/admin/email-templates/{{.Data.Meta.TemplateType}}:{{.Data.IDP.ID}}/edit" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-pencil me-1"></i>Edit Template
+            </a>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Actions</h5>
+        </div>
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <button type="submit" class="btn btn-primary me-2">
+                        <i class="bi bi-check-lg me-1"></i>Save Settings
+                    </button>
+                    <button type="button" class="btn btn-outline-info me-2" id="report-preview-btn"
+                            data-idp-id="{{.Data.IDP.ID}}"
+                            data-report-type="{{.Data.ReportType}}">
+                        <i class="bi bi-eye me-1"></i>Preview
+                    </button>
+                    <button type="button" class="btn btn-outline-warning" id="report-send-btn"
+                            data-idp-id="{{.Data.IDP.ID}}"
+                            data-report-type="{{.Data.ReportType}}">
+                        <i class="bi bi-send me-1"></i>Send Now
+                    </button>
+                    <span id="report-action-result" class="ms-2"></span>
+                </div>
+                <div>
+                    <a href="/admin/reports" class="btn btn-outline-secondary">Back to Reports</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Preview Modal -->
+<div class="modal fade" id="reportPreviewModal" tabindex="-1" aria-labelledby="reportPreviewModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="reportPreviewModalLabel">
+                    <i class="bi bi-eye me-2"></i>{{.Data.Meta.Title}} Preview — {{.Data.IDP.FriendlyName}}
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="report-preview-loading" class="text-center py-4">
+                    <span class="spinner-border me-2"></span>Generating report preview...
+                </div>
+                <div id="report-preview-error" class="alert alert-danger d-none"></div>
+                <div id="report-preview-content" class="d-none">
+                    <p class="text-muted small mb-2" id="report-preview-count"></p>
+                    <div id="report-preview-html"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Unsaved changes detection
+    var formDirty = false;
+    var reportForm = document.getElementById('report-config-form');
+    reportForm.addEventListener('change', function() { formDirty = true; });
+    reportForm.addEventListener('input', function() { formDirty = true; });
+    reportForm.addEventListener('submit', function() { formDirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (formDirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // Cron preset buttons
+    document.querySelectorAll('.cron-preset').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.getElementById('cron_schedule').value = this.dataset.cron;
+            formDirty = true;
+        });
+    });
+
+    // Report filter management
+    var filterTable = document.getElementById('report-filters-table');
+    var providerType = filterTable ? filterTable.dataset.providerType : 'ad';
+
+    var adAttrs = [
+        {value: 'distinguishedName', label: 'distinguishedName'},
+        {value: 'sAMAccountName', label: 'sAMAccountName'},
+        {value: 'displayName', label: 'displayName'},
+        {value: 'department', label: 'department'},
+        {value: 'title', label: 'title'},
+        {value: 'memberOf', label: 'memberOf'}
+    ];
+    var ipaAttrs = [
+        {value: 'dn', label: 'dn'},
+        {value: 'uid', label: 'uid'},
+        {value: 'cn', label: 'cn'},
+        {value: 'departmentNumber', label: 'departmentNumber'},
+        {value: 'title', label: 'title'},
+        {value: 'memberOf', label: 'memberOf'},
+        {value: 'nsAccountLock', label: 'nsAccountLock'}
+    ];
+    var attrs = providerType === 'freeipa' ? ipaAttrs : adAttrs;
+
+    function populateSelect(select) {
+        var saved = select.dataset.savedValue || '';
+        attrs.forEach(function(a) {
+            var opt = document.createElement('option');
+            opt.value = a.value;
+            opt.textContent = a.label;
+            if (a.value === saved) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    document.querySelectorAll('.report-filter-attr-select').forEach(populateSelect);
+
+    var addBtn = document.getElementById('add-report-filter');
+    if (addBtn) {
+        addBtn.addEventListener('click', function() {
+            var tbody = document.getElementById('report-filters-body');
+            var tr = document.createElement('tr');
+            tr.className = 'report-filter-row';
+            tr.innerHTML = '<td><select class="form-select form-select-sm report-filter-attr-select" name="filter_attribute[]"><option value="">Select...</option></select></td>' +
+                '<td><input type="text" class="form-control form-control-sm" name="filter_pattern[]" placeholder="e.g., OU=Service Accounts"></td>' +
+                '<td><input type="text" class="form-control form-control-sm" name="filter_description[]" placeholder="e.g., Exclude service accounts"></td>' +
+                '<td><button type="button" class="btn btn-sm btn-outline-danger remove-report-filter"><i class="bi bi-x"></i></button></td>';
+            tbody.appendChild(tr);
+            populateSelect(tr.querySelector('.report-filter-attr-select'));
+            formDirty = true;
+        });
+    }
+
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.remove-report-filter')) {
+            e.target.closest('.report-filter-row').remove();
+            formDirty = true;
+        }
+    });
+
+    // CSRF token
+    var csrfInput = document.querySelector('input[name="gorilla.csrf.Token"]');
+    var csrfToken = csrfInput ? csrfInput.value : '';
+
+    // Send Now button
+    var sendBtn = document.getElementById('report-send-btn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', function() {
+            var idpId = this.dataset.idpId;
+            var reportType = this.dataset.reportType;
+            var resultSpan = document.getElementById('report-action-result');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending...';
+            resultSpan.textContent = '';
+
+            fetch('/admin/reports/' + idpId + '/' + reportType + '/send', {
+                method: 'POST',
+                headers: {'X-CSRF-Token': csrfToken}
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="bi bi-send me-1"></i>Send Now';
+                if (data.status === 'success') {
+                    resultSpan.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.message + '</span>';
+                } else {
+                    resultSpan.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.message + '</span>';
+                }
+            })
+            .catch(function() {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="bi bi-send me-1"></i>Send Now';
+                resultSpan.innerHTML = '<span class="text-danger">Request failed</span>';
+            });
+        });
+    }
+
+    // Preview button
+    var previewBtn = document.getElementById('report-preview-btn');
+    if (previewBtn) {
+        previewBtn.addEventListener('click', function() {
+            var idpId = this.dataset.idpId;
+            var reportType = this.dataset.reportType;
+            var modal = new bootstrap.Modal(document.getElementById('reportPreviewModal'));
+
+            document.getElementById('report-preview-loading').classList.remove('d-none');
+            document.getElementById('report-preview-error').classList.add('d-none');
+            document.getElementById('report-preview-content').classList.add('d-none');
+            modal.show();
+
+            fetch('/admin/reports/' + idpId + '/' + reportType + '/preview', {
+                method: 'POST',
+                headers: {'X-CSRF-Token': csrfToken}
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('report-preview-loading').classList.add('d-none');
+                if (data.status === 'error') {
+                    var errEl = document.getElementById('report-preview-error');
+                    errEl.textContent = data.message;
+                    errEl.classList.remove('d-none');
+                    return;
+                }
+                document.getElementById('report-preview-count').textContent = (data.count || 0) + ' account(s)';
+                document.getElementById('report-preview-html').innerHTML = data.html || '<p class="text-muted">No accounts found.</p>';
+                document.getElementById('report-preview-content').classList.remove('d-none');
+            })
+            .catch(function(err) {
+                document.getElementById('report-preview-loading').classList.add('d-none');
+                var errEl = document.getElementById('report-preview-error');
+                errEl.textContent = 'Request failed: ' + err.message;
+                errEl.classList.remove('d-none');
+            });
+        });
+    }
+});
+</script>
+{{end}}

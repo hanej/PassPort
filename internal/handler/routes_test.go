@@ -40,13 +40,13 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	correlator := &mockCorrelator{}
 	notifier := job.New(database, registry, cryptoSvc, auditLog, logger)

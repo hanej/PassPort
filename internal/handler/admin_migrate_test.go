@@ -66,13 +66,12 @@ func setupMigrateTest(t *testing.T) *migrateTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLog, logger)
 
@@ -359,8 +358,7 @@ func buildImportRequest(t *testing.T, jsonBytes []byte, fields map[string]string
 	if _, err := fw.Write(jsonBytes); err != nil {
 		t.Fatalf("writing file contents: %v", err)
 	}
-	w.Close()
-
+	_ = w.Close()
 	req := httptest.NewRequest(http.MethodPost, "/admin/migrate/import", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	return req
@@ -411,13 +409,12 @@ func TestMigrateExport_BuildExportError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger)
 
@@ -445,8 +442,7 @@ func TestMigrateImport_NoImportFileInMultipart(t *testing.T) {
 	if err := w.WriteField("import_branding", "1"); err != nil { // some non-file field
 		t.Fatalf("WriteField: %v", err)
 	}
-	w.Close()
-
+	_ = w.Close()
 	req := httptest.NewRequest(http.MethodPost, "/admin/migrate/import", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
@@ -566,13 +562,12 @@ func TestMigrateImport_CreateIDPError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger)
 

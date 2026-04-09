@@ -31,6 +31,7 @@ type Store interface {
 	MFAStore
 	EmailTemplateStore
 	ExpirationConfigStore
+	ReportConfigStore
 	Ping(ctx context.Context) error
 	MigrationsComplete(ctx context.Context) (bool, error)
 	Close() error
@@ -349,4 +350,42 @@ type EmailTemplateStore interface {
 	GetEmailTemplate(ctx context.Context, templateType string) (*EmailTemplate, error)
 	SaveEmailTemplate(ctx context.Context, t *EmailTemplate) error
 	DeleteEmailTemplate(ctx context.Context, templateType string) error
+}
+
+// Report type constants.
+const (
+	ReportTypeExpiration = "expiration" // soon-to-expire passwords report
+	ReportTypeExpired    = "expired"    // expired accounts report
+)
+
+// ReportConfig represents the configuration for a single report type for an IDP.
+type ReportConfig struct {
+	IDPID                string
+	ReportType           string // ReportTypeExpiration or ReportTypeExpired
+	Enabled              bool
+	CronSchedule         string
+	DaysBeforeExpiration int    // only meaningful for ReportTypeExpiration
+	Recipients           string // comma-separated email addresses
+	ExcludeDisabled      bool   // exclude disabled accounts (AD: UAC bitmask; FreeIPA: via UI filter)
+	UpdatedAt            time.Time
+}
+
+// ReportFilter represents an exclusion filter for a report.
+type ReportFilter struct {
+	ID          int64
+	IDPID       string
+	ReportType  string
+	Attribute   string
+	Pattern     string
+	Description string
+}
+
+// ReportConfigStore manages report configurations.
+type ReportConfigStore interface {
+	GetReportConfig(ctx context.Context, idpID, reportType string) (*ReportConfig, error)
+	SaveReportConfig(ctx context.Context, cfg *ReportConfig) error
+	ListReportFilters(ctx context.Context, idpID, reportType string) ([]ReportFilter, error)
+	SaveReportFilters(ctx context.Context, idpID, reportType string, filters []ReportFilter) error
+	ListEnabledReportConfigs(ctx context.Context) ([]ReportConfig, error)
+	ListReportConfigsForIDP(ctx context.Context, idpID string) ([]ReportConfig, error)
 }

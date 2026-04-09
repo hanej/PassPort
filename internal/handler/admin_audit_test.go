@@ -51,13 +51,12 @@ func setupAuditTest(t *testing.T) *auditTestEnv {
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
 	}
-	tmpFile.Close()
-
+	_ = tmpFile.Close()
 	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
 	if err != nil {
 		t.Fatalf("creating audit logger: %v", err)
 	}
-	t.Cleanup(func() { auditLog.Close() })
+	t.Cleanup(func() { _ = auditLog.Close() })
 
 	h := NewAdminAuditHandler(database, renderer, logger)
 

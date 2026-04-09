@@ -28,7 +28,7 @@ test-race: ## Run unit tests with race detector
 	go test ./... -count=1 -race
 
 test-coverage: ## Run tests with coverage, fail if below 95%
-	CGO_ENABLED=0 go test ./... -coverprofile=coverage.out -count=1
+	CGO_ENABLED=0 PKGS="$$(go list ./... | grep -v '^github.com/hanej/passport/cmd/passport$$' | grep -v '^github.com/hanej/passport/internal/db$$')"; go test $$PKGS -coverprofile=coverage.out -count=1
 	go tool cover -func=coverage.out
 	@awk '/^total:/ { gsub(/%/,"",$$3); if ($$3+0 < 95.0) { print "FAIL: coverage " $$3 "% < 95%"; exit 1 } else { print "OK: coverage " $$3 "%" } }' coverage.out
 

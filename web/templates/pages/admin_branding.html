@@ -172,6 +172,17 @@
 const DEFAULT_PRIMARY = '#2c5282';
 const DEFAULT_LIGHT   = '#3182ce';
 
+var formDirty = false;
+(function() {
+    var form = document.querySelector('form[action="/admin/branding"]');
+    form.addEventListener('change', function() { formDirty = true; });
+    form.addEventListener('input', function() { formDirty = true; });
+    form.addEventListener('submit', function() { formDirty = false; });
+    window.addEventListener('beforeunload', function(e) {
+        if (formDirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+})();
+
 function updatePreview() {
     const title = document.getElementById('app_title').value || 'PassPort';
     const abbr = document.getElementById('app_abbreviation').value || 'PassPort';
@@ -212,6 +223,7 @@ function resetColor(textId, pickerId, defaultVal) {
     document.getElementById(textId).value = defaultVal;
     document.getElementById(pickerId).value = defaultVal;
     applyColorPreview();
+    formDirty = true;
 }
 
 function resetAllColors() {

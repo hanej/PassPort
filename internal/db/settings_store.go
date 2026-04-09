@@ -18,7 +18,7 @@ func (d *DB) ListAdminGroups(ctx context.Context) ([]AdminGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list admin groups: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanAdminGroups(rows)
 }
@@ -60,7 +60,7 @@ func (d *DB) GetAdminGroupsByIDP(ctx context.Context, idpID string) ([]AdminGrou
 	if err != nil {
 		return nil, fmt.Errorf("get admin groups by idp: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanAdminGroups(rows)
 }

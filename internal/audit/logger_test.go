@@ -22,7 +22,7 @@ func newTestDB(t *testing.T) *db.DB {
 	if err := d.Migrate(context.Background()); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 	return d
 }
 
@@ -33,7 +33,7 @@ func newTestLogger(t *testing.T, d *db.DB) (*Logger, string) {
 	if err != nil {
 		t.Fatalf("creating logger: %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	return l, filePath
 }
 
@@ -68,7 +68,7 @@ func TestLogWritesToDBAndFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening audit file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	if !scanner.Scan() {
@@ -113,7 +113,7 @@ func TestLogMultipleEntries(t *testing.T) {
 
 	// File should have 5 lines
 	f, _ := os.Open(filePath)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	count := 0
 	for scanner.Scan() {
@@ -249,7 +249,7 @@ func TestNewLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error creating logger, got %v", err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 }
 
 func TestReopenFile(t *testing.T) {
@@ -317,8 +317,7 @@ func TestLog_DBError(t *testing.T) {
 	ctx := context.Background()
 
 	// Close the DB to force AppendAudit to fail on the next call
-	d.Close()
-
+	_ = d.Close()
 	// Log should not panic; it logs the error and still calls writeToFile
 	l.Log(ctx, &db.AuditEntry{
 		Username: "error-user",
@@ -336,8 +335,7 @@ func TestLog_FileWriteError(t *testing.T) {
 
 	// Close the underlying RotatableFile to force a write failure
 	// (l.file is accessible because this test is in package audit)
-	l.file.Close()
-
+	_ = l.file.Close()
 	// Log should not panic; the file write error is silently logged
 	l.Log(ctx, &db.AuditEntry{
 		Username: "file-error",
@@ -390,8 +388,7 @@ func TestStartDBPurge_DBError(t *testing.T) {
 
 	// Give the ticker a moment to fire, then close the DB so the purge fails
 	time.Sleep(50 * time.Millisecond)
-	d.Close()
-
+	_ = d.Close()
 	// Let the next tick fire against the closed DB
 	time.Sleep(60 * time.Millisecond)
 	cancel()
