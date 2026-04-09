@@ -1,0 +1,33 @@
+services:
+  passport:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_MASTER_KEY: ${APP_MASTER_KEY}
+    volumes:
+      - ./config.yaml:/etc/passport/config.yaml:ro
+      - passport_data:/data
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # Uncomment to expose HTTPS (provide certs in deploy/nginx/certs/):
+      # - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Uncomment to mount TLS certificates:
+      # - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - passport
+    networks:
+      - internal
+
+volumes:
+  passport_data:
+
+networks:
+  internal:

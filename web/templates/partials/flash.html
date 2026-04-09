@@ -1,0 +1,16 @@
+{{define "flash"}}
+{{if .Flash}}
+    {{if eq (index .Flash "category") "success"}}
+    <div class="alert alert-success alert-dismissible fade show flash-message" role="alert">
+        <i class="bi bi-check-circle me-2"></i>{{index .Flash "message"}}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {{end}}
+    {{if eq (index .Flash "category") "error"}}
+    <div class="alert alert-danger alert-dismissible fade show flash-message" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>{{index .Flash "message"}}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {{end}}
+{{end}}
+{{end}}

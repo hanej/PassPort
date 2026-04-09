@@ -1,0 +1,183 @@
+{{define "title"}}Audit Log - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-4">
+    <h3><i class="bi bi-journal-text me-2"></i>Audit Log</h3>
+    <p class="text-muted">View security and administrative events.</p>
+</div>
+
+<!-- Filter Bar -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="/admin/audit" class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label for="filter_username" class="form-label">Username</label>
+                <input type="text" class="form-control form-control-sm" id="filter_username" name="username"
+                       value="{{.Data.Filter.Username}}" placeholder="Any user">
+            </div>
+            <div class="col-md-2">
+                <label for="filter_action" class="form-label">Action</label>
+                <select class="form-select form-select-sm" id="filter_action" name="action">
+                    <option value="">All Actions</option>
+                    <option value="login" {{if eq .Data.Filter.Action "login"}}selected{{end}}>Login</option>
+                    <option value="logout" {{if eq .Data.Filter.Action "logout"}}selected{{end}}>Logout</option>
+                    <option value="password_change" {{if eq .Data.Filter.Action "password_change"}}selected{{end}}>Password Change</option>
+                    <option value="link_account" {{if eq .Data.Filter.Action "link_account"}}selected{{end}}>Link Account</option>
+                    <option value="admin_config" {{if eq .Data.Filter.Action "admin_config"}}selected{{end}}>Admin Config</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="filter_result" class="form-label">Result</label>
+                <select class="form-select form-select-sm" id="filter_result" name="result">
+                    <option value="">All Results</option>
+                    <option value="success" {{if eq .Data.Filter.Result "success"}}selected{{end}}>Success</option>
+                    <option value="failure" {{if eq .Data.Filter.Result "failure"}}selected{{end}}>Failure</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="filter_from" class="form-label">From Date</label>
+                <input type="date" class="form-control form-control-sm" id="filter_from" name="start_date"
+                       value="{{.Data.Filter.StartDate}}">
+            </div>
+            <div class="col-md-2">
+                <label for="filter_to" class="form-label">To Date</label>
+                <input type="date" class="form-control form-control-sm" id="filter_to" name="end_date"
+                       value="{{.Data.Filter.EndDate}}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-funnel me-1"></i>Filter
+                </button>
+                <a href="/admin/audit" class="btn btn-outline-secondary btn-sm ms-1">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Audit Table -->
+<div class="card">
+    {{if .Data.Entries}}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Username</th>
+                    <th>Source IP</th>
+                    <th>Action</th>
+                    <th>Provider</th>
+                    <th>Result</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Data.Entries}}
+                <tr class="audit-row" role="button" style="cursor: pointer;"
+                    data-id="{{.ID}}"
+                    data-timestamp="{{fmtTime .Timestamp}}"
+                    data-username="{{.Username}}"
+                    data-source-ip="{{.SourceIP}}"
+                    data-action="{{.Action}}"
+                    data-provider-id="{{.ProviderID}}"
+                    data-provider-name="{{.ProviderName}}"
+                    data-result="{{.Result}}"
+                    data-details="{{.Details}}">
+                    <td class="small text-nowrap">{{fmtTime .Timestamp}}</td>
+                    <td class="fw-semibold">{{.Username}}</td>
+                    <td class="small text-muted font-monospace">{{.SourceIP}}</td>
+                    <td>
+                        <span class="badge bg-secondary">{{.Action}}</span>
+                    </td>
+                    <td class="small">{{.ProviderName}}</td>
+                    <td>
+                        {{if eq .Result "success"}}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Success</span>
+                        {{else}}
+                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failure</span>
+                        {{end}}
+                    </td>
+                    <td class="small text-muted text-truncate" style="max-width: 200px;">
+                        {{.Details}}
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="card-footer">
+        {{template "pagination" .Data}}
+    </div>
+    {{else}}
+    <div class="card-body">
+        <p class="text-muted mb-0"><i class="bi bi-info-circle me-2"></i>No audit entries found matching the current filters.</p>
+    </div>
+    {{end}}
+</div>
+
+<!-- Audit Detail Modal -->
+<div class="modal fade" id="auditDetailModal" tabindex="-1" aria-labelledby="auditDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="auditDetailModalLabel">Audit Entry Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><th class="text-nowrap" style="width: 140px;">Entry ID</th><td id="audit-detail-id"></td></tr>
+                        <tr><th class="text-nowrap">Timestamp</th><td id="audit-detail-timestamp"></td></tr>
+                        <tr><th class="text-nowrap">Username</th><td id="audit-detail-username" class="fw-semibold"></td></tr>
+                        <tr><th class="text-nowrap">Source IP</th><td id="audit-detail-source-ip" class="font-monospace"></td></tr>
+                        <tr><th class="text-nowrap">Action</th><td id="audit-detail-action"></td></tr>
+                        <tr><th class="text-nowrap">Provider ID</th><td id="audit-detail-provider-id"><code></code></td></tr>
+                        <tr><th class="text-nowrap">Provider Name</th><td id="audit-detail-provider-name"></td></tr>
+                        <tr><th class="text-nowrap">Result</th><td id="audit-detail-result"></td></tr>
+                        <tr><th class="text-nowrap">Details</th><td id="audit-detail-details" style="white-space: pre-wrap; word-break: break-word;"></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var rows = document.querySelectorAll('.audit-row');
+    if (rows.length === 0) return;
+
+    var modal = new bootstrap.Modal(document.getElementById('auditDetailModal'));
+
+    document.querySelector('.audit-row').closest('tbody').addEventListener('click', function(e) {
+        var row = e.target.closest('.audit-row');
+        if (!row) return;
+
+        document.getElementById('audit-detail-id').textContent = row.dataset.id;
+        document.getElementById('audit-detail-timestamp').textContent = row.dataset.timestamp;
+        document.getElementById('audit-detail-username').textContent = row.dataset.username;
+        document.getElementById('audit-detail-source-ip').textContent = row.dataset.sourceIp;
+        document.getElementById('audit-detail-action').textContent = row.dataset.action;
+        document.getElementById('audit-detail-provider-id').innerHTML = row.dataset.providerId
+            ? '<code>' + row.dataset.providerId.replace(/</g, '&lt;') + '</code>'
+            : '<span class="text-muted">-</span>';
+        document.getElementById('audit-detail-provider-name').textContent = row.dataset.providerName || '-';
+
+        var resultEl = document.getElementById('audit-detail-result');
+        if (row.dataset.result === 'success') {
+            resultEl.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Success</span>';
+        } else {
+            resultEl.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failure</span>';
+        }
+
+        document.getElementById('audit-detail-details').textContent = row.dataset.details;
+
+        modal.show();
+    });
+});
+</script>
+{{end}}

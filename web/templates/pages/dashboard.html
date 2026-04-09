@@ -1,0 +1,225 @@
+{{define "title"}}Dashboard - {{(branding).AppTitle}}{{end}}
+
+{{define "content"}}
+<div class="container">
+<div class="mb-4">
+    <h2 class="fw-bold">
+        <i class="bi bi-shield-lock me-2"></i>Welcome, {{.Session.Username}}
+    </h2>
+    <p class="text-muted">Manage your passwords across identity providers</p>
+</div>
+
+{{if .Data.Panels}}
+<div class="accordion idp-accordion" id="idp-panels">
+    {{range .Data.Panels}}
+    <div class="accordion-item idp-accordion-item idp-card-{{.IDP.ProviderType}}" data-idp-id="{{.IDP.ID}}">
+        <h2 class="accordion-header" id="heading-{{.IDP.ID}}">
+            <button class="accordion-button collapsed"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#collapse-{{.IDP.ID}}"
+                    aria-expanded="false"
+                    aria-controls="collapse-{{.IDP.ID}}">
+                <div class="d-flex align-items-center gap-2 flex-wrap flex-grow-1 me-2">
+                    <span class="fw-semibold">{{.IDP.FriendlyName}}</span>
+                    {{if eq .IDP.ProviderType "ad"}}
+                    <span class="badge badge-ad badge-sm">Active Directory</span>
+                    {{else}}
+                    <span class="badge badge-freeipa badge-sm">FreeIPA</span>
+                    {{end}}
+                    {{if eq .IDP.ID $.Data.ProviderID}}
+                    <span class="badge bg-info badge-sm">
+                        <i class="bi bi-box-arrow-in-right me-1"></i>Signed in here
+                    </span>
+                    {{end}}
+                    {{if .Mapping}}
+                    <span class="badge bg-success badge-sm ms-auto">
+                        <i class="bi bi-link-45deg me-1"></i>{{if eq .Mapping.LinkType "auto"}}Linked (Auto){{else}}Linked (Manual){{end}}
+                    </span>
+                    {{else}}
+                    <span class="badge bg-warning text-dark badge-sm ms-auto">
+                        <i class="bi bi-link me-1"></i>Unlinked
+                    </span>
+                    {{end}}
+                </div>
+            </button>
+        </h2>
+        <div id="collapse-{{.IDP.ID}}"
+             class="accordion-collapse collapse"
+             aria-labelledby="heading-{{.IDP.ID}}">
+            <div class="accordion-body">
+
+                {{if and .Mapping .Mapping.TargetAccountDN}}
+                <div class="mb-3 pb-3 border-bottom">
+                    {{if .DisplayName}}
+                    <div class="fw-semibold">{{.DisplayName}}</div>
+                    {{end}}
+                    <div class="text-muted small">
+                        <i class="bi bi-person me-1"></i>{{.TargetUsername}}
+                    </div>
+                    {{if .Email}}
+                    <div class="text-muted small">
+                        <i class="bi bi-envelope me-1"></i>{{.Email}}
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{if .Mapping}}
+                <!-- Change Password Form -->
+                <h6 class="mb-3 text-muted text-uppercase small fw-semibold">
+                    <i class="bi bi-key me-1"></i>Change Password
+                </h6>
+                <form method="POST" action="/dashboard/change-password" class="password-change-form">
+                    {{$.CSRFField}}
+                    <input type="hidden" name="idp_id" value="{{.IDP.ID}}">
+
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <div class="mb-2">
+                                <label class="form-label small">Current Password</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control password-field"
+                                           name="current_password" required
+                                           id="current-pw-{{.IDP.ID}}">
+                                    <button class="btn btn-outline-secondary toggle-password" type="button"
+                                            data-target="current-pw-{{.IDP.ID}}">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">New Password</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control password-field new-password"
+                                           name="new_password" required
+                                           id="new-pw-{{.IDP.ID}}"
+                                           data-confirm="confirm-pw-{{.IDP.ID}}">
+                                    <button class="btn btn-outline-secondary toggle-password" type="button"
+                                            data-target="new-pw-{{.IDP.ID}}">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label small">Confirm New Password</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control password-field confirm-password"
+                                           name="confirm_password" required
+                                           id="confirm-pw-{{.IDP.ID}}"
+                                           data-new="new-pw-{{.IDP.ID}}">
+                                    <button class="btn btn-outline-secondary toggle-password" type="button"
+                                            data-target="confirm-pw-{{.IDP.ID}}">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                <div class="password-match-indicator mt-1" id="match-{{.IDP.ID}}"></div>
+                            </div>
+                            <div class="d-flex justify-content-end mt-3">
+                                <button type="submit" class="btn btn-primary btn-sm pw-submit-btn" disabled>
+                                    <i class="bi bi-check-lg me-1"></i>Change Password
+                                </button>
+                            </div>
+                        </div>
+
+                        {{if and .Config .Config.PasswordComplexityHint}}
+                        <div class="col-md-4">
+                            <div class="alert alert-light small py-2 mb-0 h-100 complexity-hint">
+                                <div class="fw-semibold mb-1">
+                                    <i class="bi bi-info-circle me-1"></i>Password Requirements
+                                </div>
+                                {{markdownHTML .Config.PasswordComplexityHint}}
+                            </div>
+                        </div>
+                        {{end}}
+                    </div>
+                </form>
+
+                {{else}}
+                {{if eq $.Session.UserType "local"}}
+                <!-- Local admin — cannot link -->
+                <div class="text-muted small">
+                    <i class="bi bi-info-circle me-1"></i>The local admin account cannot be linked to identity providers.
+                </div>
+                {{else}}
+                {{if .Warning}}
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-exclamation-circle me-1"></i>{{.Warning}}
+                </div>
+                {{end}}
+                <!-- Link Account Form -->
+                <h6 class="mb-3 text-muted text-uppercase small fw-semibold">
+                    <i class="bi bi-link-45deg me-1"></i>Link Account
+                </h6>
+                <form method="POST" action="/dashboard/link-account">
+                    {{$.CSRFField}}
+                    <input type="hidden" name="idp_id" value="{{.IDP.ID}}">
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small">Username</label>
+                            <input type="text" class="form-control form-control-sm"
+                                   name="username" required placeholder="Username in this provider">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small">Password</label>
+                            <div class="input-group input-group-sm">
+                                <input type="password" class="form-control password-field"
+                                       name="password" required
+                                       id="link-pw-{{.IDP.ID}}">
+                                <button class="btn btn-outline-secondary toggle-password" type="button"
+                                        data-target="link-pw-{{.IDP.ID}}">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end mt-3">
+                        <button type="submit" class="btn btn-success btn-sm">
+                            <i class="bi bi-link-45deg me-1"></i>Link Account
+                        </button>
+                    </div>
+                </form>
+                {{end}}{{/* local vs provider */}}
+                {{end}}{{/* if .Mapping else */}}
+
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle me-2"></i>No identity providers are configured. Please contact your administrator.
+</div>
+{{end}}
+</div>{{/* container */}}
+
+{{if .Data.HasUnlinked}}
+<script>
+// Auto-refresh when there are unlinked panels — the correlation engine
+// runs in the background after login and may link them within seconds.
+(function() {
+    var attempts = 0;
+    var maxAttempts = 5;
+    var interval = setInterval(function() {
+        attempts++;
+        if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            return;
+        }
+        fetch(window.location.href, { headers: {"Accept": "text/html"} })
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                // If the response no longer contains "Unlinked", refresh.
+                if (html.indexOf("Unlinked") === -1) {
+                    window.location.reload();
+                }
+            })
+            .catch(function() { clearInterval(interval); });
+    }, 2000);
+})();
+</script>
+{{end}}
+{{end}}

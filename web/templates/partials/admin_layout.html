@@ -1,0 +1,77 @@
+{{define "title"}}Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "content"}}
+<div class="container-fluid">
+    <div class="row">
+        <!-- Sidebar -->
+        <nav class="col-md-3 col-lg-2 admin-sidebar bg-light border-end py-3">
+            <div class="position-sticky" style="top: 1rem;">
+                <h6 class="sidebar-heading px-3 mb-3 text-muted text-uppercase fw-bold small">
+                    <i class="bi bi-gear me-1"></i>Administration
+                </h6>
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "idp"}} active{{end}}" href="/admin/idp">
+                            <i class="bi bi-diagram-3 me-2"></i>Identity Providers
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "smtp"}} active{{end}}" href="/admin/smtp">
+                            <i class="bi bi-envelope me-2"></i>SMTP Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "email_templates"}} active{{end}}" href="/admin/email-templates">
+                            <i class="bi bi-file-earmark-text me-2"></i>Email Templates
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "mfa"}} active{{end}}" href="/admin/mfa">
+                            <i class="bi bi-shield-lock me-2"></i>MFA Providers
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "groups"}} active{{end}}" href="/admin/groups">
+                            <i class="bi bi-people me-2"></i>Admin Groups
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "mappings"}} active{{end}}" href="/admin/mappings">
+                            <i class="bi bi-link-45deg me-2"></i>User Mappings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "branding"}} active{{end}}" href="/admin/branding">
+                            <i class="bi bi-palette me-2"></i>Branding
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "migrate"}} active{{end}}" href="/admin/migrate">
+                            <i class="bi bi-arrow-left-right me-2"></i>Import/Export
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "audit"}} active{{end}}" href="/admin/audit">
+                            <i class="bi bi-journal-text me-2"></i>Audit Log
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "docs"}} active{{end}}" href="/admin/docs">
+                            <i class="bi bi-book me-2"></i>Documentation
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="col-md-9 col-lg-10 px-4 py-3">
+            {{block "admin_content" .}}
+            <h3>Administration Dashboard</h3>
+            <p class="text-muted">Select a section from the sidebar to manage your {{(branding).AppTitle}} configuration.</p>
+            {{end}}
+        </main>
+    </div>
+</div>
+{{end}}
+

@@ -1,0 +1,58 @@
+[Unit]
+Description=PassPort — Self-Service Password Management
+Documentation=https://github.com/hanej/passport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=passport
+Group=passport
+
+# Working directory — config.yaml and passport.db live here
+WorkingDirectory=/opt/passport
+
+# Binary and config flag
+ExecStart=/opt/passport/bin/passport -config /opt/passport/config.yaml
+
+# Master encryption key (base64-encoded, 32 bytes)
+# Generate with: openssl rand -base64 32
+# Option 1: Set here (less secure — visible in systemd status)
+# Environment=APP_MASTER_KEY=<base64-key>
+# Option 2: Use a file (recommended)
+EnvironmentFile=-/etc/passport/env
+
+# Graceful shutdown
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Allow writes to the data directory and uploads
+ReadWritePaths=/opt/passport
+
+# Logging — stdout/stderr go to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=passport
+
+[Install]
+WantedBy=multi-user.target
