@@ -1,0 +1,85 @@
+# nfpm package definition — https://nfpm.goreleaser.com/
+# Build with:  nfpm pkg --packager rpm --config nfpm.yaml --target dist/
+
+name:        passport
+arch:        ${GOARCH}      # set via GOARCH env (e.g. amd64, arm64)
+version:     ${VERSION}     # set via: VERSION=1.2.3 nfpm pkg ...
+release:     1
+section:     default
+priority:    optional
+maintainer:  Jason Hane <jhane@hanej.github.com>
+description: PassPort — Self-Service Password Management
+vendor:      hanej
+homepage:    https://github.com/hanej/passport
+license:     Apache-2.0
+
+contents:
+  # ── Binary ──────────────────────────────────────────────────────────────────
+  - src:  bin/passport
+    dst:  /opt/passport/bin/passport
+    file_info:
+      mode: 0755
+
+  # ── Systemd service ─────────────────────────────────────────────────────────
+  - src:  deploy/passport.service
+    dst:  /usr/lib/systemd/system/passport.service
+    file_info:
+      mode: 0644
+
+  # ── Logrotate ───────────────────────────────────────────────────────────────
+  - src:  deploy/logrotate/passport
+    dst:  /etc/logrotate.d/passport
+    file_info:
+      mode: 0644
+
+  # ── Example config (not overwritten on upgrade) ──────────────────────────────
+  - src:  config.yaml.example
+    dst:  /opt/passport/config.yaml
+    type: config|noreplace
+    file_info:
+      mode:  0640
+      owner: passport
+      group: passport
+
+  # ── Directories ─────────────────────────────────────────────────────────────
+  - dst:  /opt/passport/bin
+    type: dir
+    file_info:
+      mode:  0755
+      owner: passport
+      group: passport
+
+  - dst:  /opt/passport/uploads
+    type: dir
+    file_info:
+      mode:  0750
+      owner: passport
+      group: passport
+
+  - dst:  /opt/passport/logs
+    type: dir
+    file_info:
+      mode:  0750
+      owner: passport
+      group: passport
+
+  - dst:  /etc/passport
+    type: dir
+    file_info:
+      mode:  0750
+      owner: passport
+      group: passport
+
+scripts:
+  preinstall:  deploy/scripts/preinstall.sh
+  postinstall: deploy/scripts/postinstall.sh
+  preremove:   deploy/scripts/preremove.sh
+
+overrides:
+  rpm:
+    scripts:
+      preinstall:  deploy/scripts/preinstall.sh
+      postinstall: deploy/scripts/postinstall.sh
+      preremove:   deploy/scripts/preremove.sh
+    # Prevent RPM from rewriting the binary's shebang / stripping
+    compression: xz

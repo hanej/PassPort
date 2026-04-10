@@ -43,6 +43,9 @@ import (
 	"github.com/hanej/passport/internal/server"
 )
 
+// version is set at build time via -ldflags "-X main.version=<tag>".
+var version = "dev"
+
 // fanoutHandler is a slog.Handler that writes log records to multiple handlers.
 type fanoutHandler struct {
 	handlers []slog.Handler
@@ -104,11 +107,17 @@ func deriveKey(masterKey, label []byte) []byte {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	configPath := flag.String("config", "config.yaml", "path to configuration file")
 	exportPath := flag.String("export", "", "export configuration to file and exit (secrets decrypted)")
 	backupPath := flag.String("backup", "", "backup configuration to file and exit (secrets stay encrypted)")
 	importPath := flag.String("import", "", "import configuration from file and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
