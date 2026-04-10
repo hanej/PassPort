@@ -1002,9 +1002,7 @@ Each encryption operation uses a unique random nonce. The ciphertext includes th
 
 ### CSRF Protection
 
-All state-changing operations (POST requests) are protected by CSRF tokens using gorilla/csrf. The CSRF key is deterministically derived from the master key using HMAC-SHA256, so tokens remain valid across server restarts.
-
-When running without TLS (no `tls_cert`/`tls_key` and `trust_proxy: false`), requests are marked as plaintext to bypass strict Referer checking that only applies to HTTPS.
+All state-changing operations (POST requests) are protected by CSRF tokens using [filippo.io/csrf](https://pkg.go.dev/filippo.io/csrf). The CSRF key is deterministically derived from the master key using HMAC-SHA256, so tokens remain valid across server restarts.
 
 ### Rate Limiting
 
