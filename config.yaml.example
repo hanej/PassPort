@@ -12,7 +12,7 @@ server:
   # Set to true if running behind a reverse proxy that terminates TLS.
   # This trusts X-Forwarded-Proto to determine if the connection is secure,
   # and sets the Secure flag on cookies accordingly.
-  trust_proxy: false
+  trust_proxy: true
 
   # Time to wait for in-flight requests to complete on shutdown
   drain_timeout: 15s
@@ -20,6 +20,13 @@ server:
 database:
   # Path to SQLite database file
   path: passport.db
+
+session:
+  # Session time-to-live
+  ttl: 8h
+
+  # How often to purge expired sessions
+  purge_freq: 5m
 
 logging:
   # Stdout logging
@@ -29,20 +36,13 @@ logging:
 
   # File logging (optional — leave path empty to disable)
   file:
-    path: ""        # e.g., "passport.log"
+    path: "logs/passport.log"  # relative to WorkingDirectory (/opt/passport)
     format: json    # "json" or "text"
     level: debug    # "debug", "info", "warn", "error"
 
-session:
-  # Session time-to-live
-  ttl: 8h
-
-  # How often to purge expired sessions
-  purge_freq: 5m
-
 audit:
   # Path to the append-only JSON audit log file (permanent record)
-  file_path: audit.log
+  file_path: "logs/audit.log"
 
   # How long to keep audit entries in the database (for the admin UI viewer).
   # Entries older than this are automatically purged from the DB.
@@ -51,3 +51,4 @@ audit:
 
   # How often the DB audit purge runs
   purge_freq: 1h
+

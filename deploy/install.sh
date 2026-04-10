@@ -22,6 +22,7 @@ fi
 echo "Creating directories..."
 mkdir -p "${BIN_DIR}"
 mkdir -p "${APP_DIR}/uploads"
+mkdir -p "${APP_DIR}/logs"
 mkdir -p "${CONF_DIR}"
 
 # Copy binary
