@@ -74,7 +74,7 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 		ForgotPassword:      NewForgotPasswordHandler(database, registry, sm, renderer, auditLog, logger),
 		Dashboard:           NewDashboardHandler(database, sm, registry, correlator, renderer, auditLog, logger),
 		Link:                NewLinkHandler(database, sm, registry, renderer, auditLog, logger),
-		Bootstrap:           NewBootstrapHandler(database, sm, renderer, auditLog, logger),
+		Bootstrap:           NewBootstrapHandler(database, sm, renderer, auditLog, auth.PasswordPolicy{}, logger),
 		AdminIDP:            NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLog, logger, uploadsPath),
 		AdminSMTP:           NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLog, logger),
 		AdminGroups:         NewAdminGroupsHandler(database, registry, renderer, auditLog, logger),

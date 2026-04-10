@@ -27,5 +27,23 @@ EOF
     chown passport:passport /etc/passport/env
 fi
 
+# Generate a self-signed TLS certificate if one does not already exist.
+# Replace /etc/passport/tls/cert.pem with a CA-signed certificate for production.
+TLS_DIR=/etc/passport/tls
+if [ ! -f "${TLS_DIR}/cert.pem" ]; then
+    mkdir -p "${TLS_DIR}"
+    HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+        -keyout "${TLS_DIR}/key.pem" \
+        -out    "${TLS_DIR}/cert.pem" \
+        -subj   "/CN=${HOSTNAME}" \
+        -addext "subjectAltName=DNS:${HOSTNAME},DNS:localhost,IP:127.0.0.1" \
+        2>/dev/null
+    chmod 640 "${TLS_DIR}/key.pem"
+    chmod 644 "${TLS_DIR}/cert.pem"
+    chown passport:passport "${TLS_DIR}/key.pem" "${TLS_DIR}/cert.pem"
+fi
+chown passport:passport "${TLS_DIR}"
+
 systemctl daemon-reload
 systemctl enable passport

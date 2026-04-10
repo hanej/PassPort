@@ -53,6 +53,11 @@ type AdminStore interface {
 	CreateLocalAdmin(ctx context.Context, username, passwordHash string) (*LocalAdmin, error)
 	UpdateLocalAdminPassword(ctx context.Context, username, passwordHash string, mustChange bool) error
 	ListLocalAdmins(ctx context.Context) ([]LocalAdmin, error)
+	// AddPasswordHistory records passwordHash in the history for username, then
+	// trims history to retain only the most recent keepN entries. keepN <= 0 skips retention.
+	AddPasswordHistory(ctx context.Context, username, passwordHash string, keepN int) error
+	// GetPasswordHistory returns all stored password hashes for username, most-recent-first.
+	GetPasswordHistory(ctx context.Context, username string) ([]string, error)
 }
 
 // IdentityProviderRecord represents an identity provider stored in the database.
