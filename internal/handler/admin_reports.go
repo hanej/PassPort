@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 	"github.com/robfig/cron/v3"
 
 	"github.com/hanej/passport/internal/audit"
@@ -100,9 +99,8 @@ func (h *AdminReportsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_reports.html", PageData{
-		Title:     "Reports",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Reports",
+		Session: sess,
 		Data: map[string]any{
 			"Items":      items,
 			"ActivePage": "reports",
@@ -162,9 +160,8 @@ func (h *AdminReportsHandler) Show(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_report_config.html", PageData{
-		Title:     meta.Title + " – " + record.FriendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   meta.Title + " – " + record.FriendlyName,
+		Session: sess,
 		Data: map[string]any{
 			"IDP":        record,
 			"Config":     cfg,
@@ -216,10 +213,9 @@ func (h *AdminReportsHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := cron.ParseStandard(cronSchedule); err != nil {
 		h.renderer.Render(w, r, "admin_report_config.html", PageData{
-			Title:     meta.Title + " – " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Invalid cron schedule: " + err.Error()},
+			Title:   meta.Title + " – " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Invalid cron schedule: " + err.Error()},
 			Data: map[string]any{
 				"IDP":  record,
 				"Meta": meta,
@@ -254,10 +250,9 @@ func (h *AdminReportsHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SaveReportConfig(r.Context(), cfg); err != nil {
 		h.logger.Error("failed to save report config", "error", err, "idp_id", idpID)
 		h.renderer.Render(w, r, "admin_report_config.html", PageData{
-			Title:     meta.Title + " – " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to save configuration"},
+			Title:   meta.Title + " – " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to save configuration"},
 			Data: map[string]any{
 				"IDP":        record,
 				"Config":     cfg,
@@ -275,10 +270,9 @@ func (h *AdminReportsHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SaveReportFilters(r.Context(), idpID, reportType, filters); err != nil {
 		h.logger.Error("failed to save report filters", "error", err, "idp_id", idpID)
 		h.renderer.Render(w, r, "admin_report_config.html", PageData{
-			Title:     meta.Title + " – " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to save filters"},
+			Title:   meta.Title + " – " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to save filters"},
 			Data: map[string]any{
 				"IDP":        record,
 				"Config":     cfg,
@@ -309,10 +303,9 @@ func (h *AdminReportsHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_report_config.html", PageData{
-		Title:     meta.Title + " – " + record.FriendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "success", "message": "Report settings saved successfully"},
+		Title:   meta.Title + " – " + record.FriendlyName,
+		Session: sess,
+		Flash:   map[string]string{"category": "success", "message": "Report settings saved successfully"},
 		Data: map[string]any{
 			"IDP":        record,
 			"Config":     cfg,

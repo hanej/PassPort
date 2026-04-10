@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/crypto"
@@ -500,9 +498,8 @@ func (h *MFAHandler) renderOTPForm(w http.ResponseWriter, r *http.Request, ttlMi
 		flash = map[string]string{"category": "error", "message": flashMsg}
 	}
 	h.renderer.Render(w, r, "mfa_otp.html", PageData{
-		Title:     "Verify Your Identity",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     flash,
+		Title: "Verify Your Identity",
+		Flash: flash,
 		Data: map[string]any{
 			"TTLMinutes": ttlMinutes,
 		},

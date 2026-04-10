@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -74,9 +73,8 @@ func (h *AdminMFAHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_mfa_list.html", PageData{
-		Title:     "MFA Providers",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "MFA Providers",
+		Session: sess,
 		Data: map[string]any{
 			"Providers":         providers,
 			"DefaultMFAID":      defaultID,
@@ -92,9 +90,8 @@ func (h *AdminMFAHandler) ShowCreate(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 
 	h.renderer.Render(w, r, "admin_mfa_form.html", PageData{
-		Title:     "Add MFA Provider",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Add MFA Provider",
+		Session: sess,
 		Data: map[string]any{
 			"Mode":       "create",
 			"ActivePage": "mfa",
@@ -202,10 +199,9 @@ func (h *AdminMFAHandler) ShowEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_mfa_form.html", PageData{
-		Title:     "Edit MFA Provider",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		Data:      data,
+		Title:   "Edit MFA Provider",
+		Session: sess,
+		Data:    data,
 	})
 }
 
@@ -513,11 +509,10 @@ func (h *AdminMFAHandler) renderFormError(w http.ResponseWriter, r *http.Request
 		title = "Edit MFA Provider"
 	}
 	h.renderer.Render(w, r, "admin_mfa_form.html", PageData{
-		Title:     title,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "error", "message": message},
-		Data:      data,
+		Title:   title,
+		Session: sess,
+		Flash:   map[string]string{"category": "error", "message": message},
+		Data:    data,
 	})
 }
 

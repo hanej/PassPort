@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	csrf "filippo.io/csrf/gorilla"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-ldap/ldap/v3"
 
@@ -142,9 +141,8 @@ func (h *AdminIDPHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_idp_list.html", PageData{
-		Title:     "Identity Providers",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Identity Providers",
+		Session: sess,
 		Data: map[string]any{
 			"IDPs":       items,
 			"ActivePage": "idp",
@@ -172,9 +170,8 @@ func (h *AdminIDPHandler) ShowCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_idp_form.html", PageData{
-		Title:     "Add Identity Provider",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Add Identity Provider",
+		Session: sess,
 		Data: map[string]any{
 			"Mode":           "create",
 			"ActivePage":     "idp",
@@ -208,11 +205,10 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if idpID == "" {
 		h.renderer.Render(w, r, "admin_idp_form.html", PageData{
-			Title:     "Add Identity Provider",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "ID is required"},
-			Data:      map[string]any{"Mode": "create"},
+			Title:   "Add Identity Provider",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "ID is required"},
+			Data:    map[string]any{"Mode": "create"},
 		})
 		return
 	}
@@ -260,11 +256,10 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.CreateIDP(r.Context(), record); err != nil {
 		h.logger.Error("failed to create IDP", "error", err)
 		h.renderer.Render(w, r, "admin_idp_form.html", PageData{
-			Title:     "Add Identity Provider",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to create identity provider: " + err.Error()},
-			Data:      map[string]any{"Mode": "create"},
+			Title:   "Add Identity Provider",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to create identity provider: " + err.Error()},
+			Data:    map[string]any{"Mode": "create"},
 		})
 		return
 	}
@@ -381,9 +376,8 @@ func (h *AdminIDPHandler) ShowEdit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_idp_form.html", PageData{
-		Title:     "Edit Identity Provider",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Edit Identity Provider",
+		Session: sess,
 		Data: map[string]any{
 			"Mode":           "edit",
 			"IDP":            record,
@@ -1187,9 +1181,8 @@ func (h *AdminIDPHandler) BrowsePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_idp_browse.html", PageData{
-		Title:     "Browse Directory - " + record.FriendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Browse Directory - " + record.FriendlyName,
+		Session: sess,
 		Data: map[string]any{
 			"IDP":          record,
 			"BaseDN":       cfg.BaseDN,

@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/crypto"
@@ -48,9 +46,8 @@ func (h *AdminMigrateHandler) Show(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 
 	h.renderer.Render(w, r, "admin_migrate.html", PageData{
-		Title:     "Import/Export",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Import/Export",
+		Session: sess,
 		Data: map[string]any{
 			"ActivePage": "migrate",
 		},
@@ -171,10 +168,9 @@ func (h *AdminMigrateHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminMigrateHandler) renderMigratePage(w http.ResponseWriter, r *http.Request, sess *db.Session, category, message string, result *migrate.ImportResult) {
 	h.renderer.Render(w, r, "admin_migrate.html", PageData{
-		Title:     "Import/Export",
-		Session:   sess,
-		Flash:     map[string]string{"category": category, "message": message},
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Import/Export",
+		Session: sess,
+		Flash:   map[string]string{"category": category, "message": message},
 		Data: map[string]any{
 			"ActivePage":   "migrate",
 			"ImportResult": result,

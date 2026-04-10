@@ -13,17 +13,18 @@ Comprehensive documentation for PassPort, a self-service password management too
 5. [Forgot Password](#5-forgot-password)
 6. [MFA Providers](#6-mfa-providers)
 7. [Password Expiration Notifications](#7-password-expiration-notifications)
-8. [Email Configuration](#8-email-configuration)
-9. [Email Templates](#9-email-templates)
-10. [Admin Groups](#10-admin-groups)
-11. [User Mappings](#11-user-mappings)
-12. [Audit Log](#12-audit-log)
-13. [Branding](#13-branding)
-14. [Security](#14-security)
-15. [Deployment](#15-deployment)
-16. [Logging](#16-logging)
-17. [API and Health Checks](#17-api-and-health-checks)
-18. [Backup & Migration](#18-backup--migration)
+8. [Reports](#8-reports)
+9. [Email Configuration](#9-email-configuration)
+10. [Email Templates](#10-email-templates)
+11. [Admin Groups](#11-admin-groups)
+12. [User Mappings](#12-user-mappings)
+13. [Audit Log](#13-audit-log)
+14. [Branding](#14-branding)
+15. [Security](#15-security)
+16. [Deployment](#16-deployment)
+17. [Logging](#17-logging)
+18. [API and Health Checks](#18-api-and-health-checks)
+19. [Backup & Migration](#19-backup--migration)
 
 ---
 
@@ -577,7 +578,114 @@ Cron schedules are reloaded from the database every 5 minutes. Changes made in t
 
 ---
 
-## 8. Email Configuration
+## 8. Reports
+
+Reports are administrator-facing email summaries of account password health across an IDP. Unlike password expiration notifications (which email individual users), reports send a consolidated list of affected accounts to a configured set of recipients.
+
+Two report types are supported per IDP:
+
+| Report Type | Description |
+|-------------|-------------|
+| **Soon-to-Expire Passwords** | Accounts whose passwords will expire within the configured threshold |
+| **Expired Accounts** | Accounts whose passwords have already expired |
+
+Each report type is configured independently per IDP. Navigate to **Admin > Reports**, select an identity provider, then click the report type to configure.
+
+### Configuration Fields
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| Enabled | Turn the scheduled report on or off | `false` |
+| Cron Schedule | Standard 5-field cron expression for when to send the report | `0 7 * * 1` (Mondays at 7 AM) |
+| Days Before Expiration | Accounts expiring within this many days are included (Soon-to-Expire only) | `14` |
+| Recipients | Comma-separated list of email addresses to send the report to | (empty) |
+| Exclude Disabled Accounts | Skip accounts that are disabled in the directory | `true` |
+
+**Active Directory:** When Exclude Disabled is on, PassPort uses the LDAP extensible match `(!(userAccountControl:1.2.840.113556.1.4.803:=2))` filter at the LDAP level.
+
+**FreeIPA:** Disabled account exclusion is handled via exclusion filters (see below). For new FreeIPA report configs, a default filter matching `nsAccountLock=true` is pre-populated.
+
+### Cron Schedule Syntax
+
+Reports use the same 5-field cron syntax as expiration notifications:
+
+```
+  *    *    *    *    *
+  |    |    |    |    |
+  |    |    |    |    +--- day of week (0-6, Sunday=0)
+  |    |    |    +-------- month (1-12)
+  |    |    +------------- day of month (1-31)
+  |    +------------------ hour (0-23)
+  +----------------------- minute (0-59)
+```
+
+Examples:
+- `0 7 * * 1` -- every Monday at 7:00 AM (default)
+- `0 8 * * 1-5` -- weekdays at 8:00 AM
+- `0 6 1 * *` -- first day of each month at 6:00 AM
+
+### Exclusion Filters
+
+Exclusion filters prevent specific accounts from appearing in the report. Each filter consists of:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| Attribute | LDAP attribute to check (`dn`, `distinguishedName`, or any user attribute) | `distinguishedName` |
+| Pattern | Regular expression to match | `OU=Service Accounts` |
+| Description | Human-readable note | `Skip service accounts` |
+
+If any filter matches a user, that account is excluded from the report. Filters are evaluated in order; the first match wins.
+
+Examples:
+- Exclude service accounts: attribute `distinguishedName`, pattern `OU=Service Accounts`
+- Exclude a specific account: attribute `sAMAccountName`, pattern `^svc-backup$`
+- Exclude FreeIPA disabled accounts: attribute `nsAccountLock`, pattern `(?i)^true$`
+
+### Report Contents
+
+Each sent report includes an HTML table with the following columns:
+
+| Column | Description |
+|--------|-------------|
+| Display Name | User's display name from the directory |
+| Account Name | Login name (`sAMAccountName` for AD, `uid` for FreeIPA) |
+| Password Last Set | Date the password was last changed |
+| Password Expiration | Date the password expires or expired |
+| Days Remaining | Days until expiration (Soon-to-Expire report only; negative = already expired) |
+| Last Logon | Most recent logon time (Active Directory only, when available) |
+
+Soon-to-Expire reports are sorted by expiration date (nearest first). Expired Account reports are sorted alphabetically by account name.
+
+If no matching accounts exist when the job runs, the email is skipped entirely.
+
+### Preview
+
+The **Preview** button generates the report HTML using the current directory data and displays it inline without sending any email. Use this to verify filter configuration and check the current account list before enabling the scheduled report.
+
+### Send Now
+
+The **Send Now** button runs the report immediately (outside the cron schedule) and sends it to the configured recipients. SMTP must be configured and enabled for this to work.
+
+### Email Templates
+
+Reports use separate email templates from expiration notifications:
+
+| Template Type | Used For |
+|---------------|----------|
+| `expiration_report` | Soon-to-Expire Passwords report emails |
+| `expiration_report:<idp_id>` | Per-IDP override for the soon-to-expire report |
+| `expired_accounts_report` | Expired Accounts report emails |
+| `expired_accounts_report:<idp_id>` | Per-IDP override for the expired accounts report |
+
+See [Email Templates](#10-email-templates) for how to edit templates.
+
+### Schedule Reloading
+
+Report cron schedules are reloaded from the database every 5 minutes. Saving a report configuration triggers an immediate reload, so changes take effect without a restart.
+
+---
+
+## 9. Email Configuration
 
 ### SMTP Setup
 
@@ -616,7 +724,7 @@ Use the **Send Test Email** button to send a test message to a specified address
 
 ---
 
-## 9. Email Templates
+## 10. Email Templates
 
 PassPort uses HTML email templates for all outbound messages. Templates are edited using a TinyMCE rich-text editor in the admin UI.
 
@@ -626,6 +734,10 @@ PassPort uses HTML email templates for all outbound messages. Templates are edit
 |------|----------|
 | `password_expiration` | Password expiration notification emails |
 | `password_expiration:<idp_id>` | Per-IDP override for expiration notifications |
+| `expiration_report` | Soon-to-Expire Passwords report emails |
+| `expiration_report:<idp_id>` | Per-IDP override for the soon-to-expire report |
+| `expired_accounts_report` | Expired Accounts report emails |
+| `expired_accounts_report:<idp_id>` | Per-IDP override for the expired accounts report |
 
 ### Available Template Variables
 
@@ -639,6 +751,15 @@ Variables are inserted using Go template syntax: `{{.VariableName}}`.
 | `{{.ProviderName}}` | Friendly name of the IDP | `Corporate AD` |
 | `{{.ExpirationDate}}` | Formatted expiration date and time | `Jan 15, 2026 3:00 PM EST` |
 | `{{.DaysRemaining}}` | Number of days until expiration | `7` |
+
+**Report Templates (expiration_report and expired_accounts_report):**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{{.ProviderName}}` | Friendly name of the IDP | `Corporate AD` |
+| `{{.GeneratedDate}}` | Date and time the report was generated | `Apr 9, 2026 7:00 AM EDT` |
+| `{{.ReportTable}}` | Pre-rendered HTML table of affected accounts | (HTML) |
+| `{{.AccountCount}}` | Number of accounts in the report | `12` |
 
 ### Editing Templates
 
@@ -655,13 +776,7 @@ Use the **Preview** button to render the template with sample data. This shows e
 
 ### Per-IDP Overrides
 
-To customize the expiration notification for a specific IDP:
-
-1. Navigate to **Admin > Email Templates**
-2. Create or edit a template with type `password_expiration:<idp_id>`
-3. When the expiration job runs for that IDP, it will use the IDP-specific template instead of the global one
-
-If no IDP-specific template exists, the global `password_expiration` template is used as a fallback.
+To customize an email for a specific IDP, create a template with the IDP-specific type suffix (e.g., `password_expiration:<idp_id>`, `expiration_report:<idp_id>`, `expired_accounts_report:<idp_id>`). When the job runs for that IDP, the IDP-specific template takes precedence over the global one.
 
 ### Resetting to Defaults
 
@@ -669,7 +784,7 @@ Use the **Reset to Default** button to restore a template to the built-in defaul
 
 ---
 
-## 10. Admin Groups
+## 11. Admin Groups
 
 Admin groups allow directory users to access the admin UI by mapping LDAP groups to the admin role.
 
@@ -697,7 +812,7 @@ The bootstrap local admin account (`admin`) always has admin access regardless o
 
 ---
 
-## 11. User Mappings
+## 12. User Mappings
 
 User mappings track the correlation between a user's authenticating account and their accounts on other IDPs.
 
@@ -733,7 +848,7 @@ Admins can delete individual mappings or all mappings for a user. This forces re
 
 ---
 
-## 12. Audit Log
+## 13. Audit Log
 
 PassPort maintains a dual audit log for all security-relevant events.
 
@@ -771,6 +886,8 @@ PassPort maintains a dual audit log for all security-relevant events.
 | `email_template_reset` | Email template reset to default |
 | `expiration_notification` | Expiration email sent |
 | `expiration_config_update` | Expiration config changed |
+| `report_config_update` | Report configuration changed |
+| `report_sent` | Report email sent to recipients |
 
 ### Filtering
 
@@ -798,7 +915,7 @@ Database entries older than `db_retention` are automatically purged at the inter
 
 ---
 
-## 13. Branding
+## 14. Branding
 
 PassPort supports whitelabel branding to match your organization's identity.
 
@@ -847,7 +964,7 @@ Each identity provider can have its own logo. Set the logo when creating or edit
 
 ---
 
-## 14. Security
+## 15. Security
 
 ### Master Key Management
 
@@ -920,7 +1037,7 @@ Only enable this when PassPort is behind a trusted reverse proxy. Enabling it wh
 
 ---
 
-## 15. Deployment
+## 16. Deployment
 
 ### Directory Layout
 
@@ -1048,7 +1165,7 @@ Caddy automatically sets the required headers.
 
 ---
 
-## 16. Logging
+## 17. Logging
 
 PassPort supports dual logging with independent configuration for stdout and file output.
 
@@ -1259,7 +1376,7 @@ On Windows, rely on stdout logging captured by the Windows Service Manager or NS
 
 ---
 
-## 17. API and Health Checks
+## 18. API and Health Checks
 
 PassPort exposes two health check endpoints that are exempt from CSRF protection and authentication. These are designed for load balancers, monitoring systems, and orchestrators.
 
@@ -1324,7 +1441,7 @@ option httpchk GET /readyz
 http-check expect status 200
 ```
 
-## 18. Backup & Migration
+## 19. Backup & Migration
 
 PassPort provides tools for backing up configuration and migrating to a new installation. There are two modes:
 
@@ -1342,6 +1459,7 @@ Both backup and export include all configuration data:
 | Attribute mappings | Yes |
 | Correlation rules | Yes |
 | Password expiration config + filters | Yes |
+| Report configs + filters | Yes |
 | Admin groups | Yes |
 | User-IDP mappings | Yes |
 | SMTP configuration + credentials | Yes |

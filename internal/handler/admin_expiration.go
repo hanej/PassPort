@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 	"github.com/robfig/cron/v3"
 
 	"github.com/hanej/passport/internal/audit"
@@ -93,9 +92,8 @@ func (h *AdminExpirationHandler) Show(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
-		Title:     "Password Expiration - " + record.FriendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Password Expiration - " + record.FriendlyName,
+		Session: sess,
 		Data: map[string]any{
 			"IDP":        record,
 			"Config":     cfg,
@@ -144,10 +142,9 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if _, err := cron.ParseStandard(cronSchedule); err != nil {
 		h.logger.Debug("invalid cron schedule", "schedule", cronSchedule, "error", err)
 		h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
-			Title:     "Password Expiration - " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Invalid cron schedule: " + err.Error()},
+			Title:   "Password Expiration - " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Invalid cron schedule: " + err.Error()},
 			Data: map[string]any{
 				"IDP": record,
 				"Config": &db.ExpirationConfig{
@@ -175,10 +172,9 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SaveExpirationConfig(r.Context(), cfg); err != nil {
 		h.logger.Error("failed to save expiration config", "error", err, "idp_id", idpID)
 		h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
-			Title:     "Password Expiration - " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to save configuration"},
+			Title:   "Password Expiration - " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to save configuration"},
 			Data: map[string]any{
 				"IDP":        record,
 				"Config":     cfg,
@@ -195,10 +191,9 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SaveExpirationFilters(r.Context(), idpID, filters); err != nil {
 		h.logger.Error("failed to save expiration filters", "error", err, "idp_id", idpID)
 		h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
-			Title:     "Password Expiration - " + record.FriendlyName,
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to save filters"},
+			Title:   "Password Expiration - " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to save filters"},
 			Data: map[string]any{
 				"IDP":        record,
 				"Config":     cfg,
@@ -238,10 +233,9 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
-		Title:     "Password Expiration - " + record.FriendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "success", "message": "Password expiration settings saved successfully"},
+		Title:   "Password Expiration - " + record.FriendlyName,
+		Session: sess,
+		Flash:   map[string]string{"category": "success", "message": "Password expiration settings saved successfully"},
 		Data: map[string]any{
 			"IDP":        record,
 			"Config":     cfg,
