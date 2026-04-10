@@ -661,7 +661,7 @@ func TestHandleLogoUpload_NoFile(t *testing.T) {
 
 func TestNewRenderer_LoadsAndHasPages(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}

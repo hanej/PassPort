@@ -85,7 +85,7 @@ func TestPageName(t *testing.T) {
 
 func TestNewRenderer_LoadsTemplates(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer failed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestNewRenderer_LoadsTemplates(t *testing.T) {
 
 func TestRenderer_TemplateNotFound(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestRenderer_TemplateNotFound(t *testing.T) {
 
 func TestRenderer_RenderError(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRenderer_RenderError(t *testing.T) {
 
 func TestRenderer_JSON(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestRenderer_JSON(t *testing.T) {
 
 func TestRenderer_SetBranding(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestTemplateFuncMap_HexToRGB(t *testing.T) {
 	// The parseHex tests above cover the underlying logic; here we just
 	// ensure NewRenderer doesn't error when these funcs are invoked.
 	logger := testLogger()
-	_, err := NewRenderer(logger)
+	_, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestTemplateFuncMap_HexToRGB(t *testing.T) {
 // the hexToRGB and darkenHex success paths (lines 85-103 in render.go).
 func TestFuncMap_HexToRGBAndDarken(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestFuncMap_HexToRGBAndDarken(t *testing.T) {
 // to cover the pages, add, and subtract funcmap closures (lines 60-72 in render.go).
 func TestFuncMap_PagesAddSubtract(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestFuncMap_PagesAddSubtract(t *testing.T) {
 // to cover the markdownHTML funcmap closure (lines 76-82 in render.go).
 func TestFuncMap_MarkdownHTML(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestRenderer_JSONEncodeError(t *testing.T) {
 // their failure values (empty string / original value).
 func TestFuncMap_InvalidHexBranding(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestFuncMap_InvalidHexBranding(t *testing.T) {
 // {{fmtTime .VerifiedAt}} when .VerifiedAt is non-nil.
 func TestFuncMap_FmtTimePointer(t *testing.T) {
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}

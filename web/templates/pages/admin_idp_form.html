@@ -73,19 +73,23 @@
                 <div class="col-12">
                     <hr class="card-section-divider">
                     <label for="logo_file" class="form-label">Logo</label>
-                    {{if and (eq .Data.Mode "edit") .Data.IDP.LogoURL}}
-                    <div class="mb-2 d-flex align-items-center gap-3" id="current-logo-preview">
-                        <img src="{{.Data.IDP.LogoURL}}" alt="Current logo" height="32" class="border rounded p-1">
+                    <div class="mb-2 d-flex align-items-center gap-3 {{if not (and (eq .Data.Mode "edit") .Data.IDP.LogoURL)}}d-none{{end}}" id="current-logo-preview">
+                        <img src="{{if .Data.IDP.LogoURL}}{{.Data.IDP.LogoURL}}{{end}}" alt="Current logo" height="32" class="border rounded p-1" id="logo-preview-img">
                         <span class="text-muted small">Current logo</span>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="document.getElementById('remove_logo').value='1'; document.getElementById('current-logo-preview').classList.add('d-none');">
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="logo-remove-btn" onclick="removeLogo()">
                             <i class="bi bi-trash me-1"></i>Remove
                         </button>
                     </div>
-                    {{end}}
                     <input type="hidden" id="remove_logo" name="remove_logo" value="">
-                    <input type="file" class="form-control" id="logo_file" name="logo_file"
-                           accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico">
-                    <div class="form-text">Upload a logo for this provider. Displayed on the login page.</div>
+                    <div class="input-group">
+                        <input type="file" class="form-control" id="logo_file" name="logo_file"
+                               accept=".png,.jpg,.jpeg,.svg,.gif,.webp,.ico">
+                        <button type="button" class="btn btn-outline-secondary" id="logo-upload-btn" onclick="uploadLogo()">
+                            <i class="bi bi-upload me-1"></i>Upload
+                        </button>
+                    </div>
+                    <div class="form-text">Select a logo and click Upload. Displayed on the login page.</div>
+                    <div id="logo-upload-error" class="text-danger small mt-1 d-none"></div>
                 </div>
             </div>
         </div>
@@ -378,4 +382,83 @@
         </div>
     </div>
 </form>
+
+<script>
+(function () {
+    var mode = {{if eq .Data.Mode "edit"}}"edit"{{else}}"create"{{end}};
+    var idpID = {{if eq .Data.Mode "edit"}}{{.Data.IDP.ID | js}}{{else}}""{{end}};
+
+    function csrfToken() {
+        var el = document.querySelector('input[name="gorilla.csrf.Token"]');
+        return el ? el.value : '';
+    }
+
+    window.uploadLogo = function () {
+        var fileInput = document.getElementById('logo_file');
+        var errDiv = document.getElementById('logo-upload-error');
+        var btn = document.getElementById('logo-upload-btn');
+
+        errDiv.classList.add('d-none');
+        errDiv.textContent = '';
+
+        if (!fileInput.files || fileInput.files.length === 0) {
+            errDiv.textContent = 'Please select a file first.';
+            errDiv.classList.remove('d-none');
+            return;
+        }
+
+        if (mode === 'create') {
+            // No server endpoint yet — show local preview only.
+            var reader = new FileReader();
+            reader.onload = function (e) { showPreview(e.target.result); };
+            reader.readAsDataURL(fileInput.files[0]);
+            return;
+        }
+
+        var formData = new FormData();
+        formData.append('logo_file', fileInput.files[0]);
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
+
+        fetch('/admin/idp/' + encodeURIComponent(idpID) + '/logo', {
+            method: 'POST',
+            headers: {'X-CSRF-Token': csrfToken()},
+            body: formData
+        })
+        .then(function (res) { return res.json().then(function (d) { return {ok: res.ok, data: d}; }); })
+        .then(function (r) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload';
+            if (!r.ok) {
+                errDiv.textContent = r.data.error || 'Upload failed.';
+                errDiv.classList.remove('d-none');
+                return;
+            }
+            showPreview(r.data.logo_url);
+            fileInput.value = '';
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload';
+            errDiv.textContent = 'Upload failed. Please try again.';
+            errDiv.classList.remove('d-none');
+        });
+    };
+
+    window.removeLogo = function () {
+        document.getElementById('remove_logo').value = '1';
+        document.getElementById('current-logo-preview').classList.add('d-none');
+        document.getElementById('logo_file').value = '';
+    };
+
+    function showPreview(src) {
+        var preview = document.getElementById('current-logo-preview');
+        var img = document.getElementById('logo-preview-img');
+        img.src = src;
+        document.getElementById('remove_logo').value = '';
+        preview.classList.remove('d-none');
+    }
+})();
+</script>
 {{end}}

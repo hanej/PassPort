@@ -10,8 +10,14 @@ import (
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 
-	if cfg.Server.Addr != ":8080" {
-		t.Errorf("expected addr :8080, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8443" {
+		t.Errorf("expected addr :8443, got %s", cfg.Server.Addr)
+	}
+	if cfg.Server.TLSCert != "/etc/passport/tls/cert.pem" {
+		t.Errorf("expected tls_cert /etc/passport/tls/cert.pem, got %s", cfg.Server.TLSCert)
+	}
+	if cfg.Server.TLSKey != "/etc/passport/tls/key.pem" {
+		t.Errorf("expected tls_key /etc/passport/tls/key.pem, got %s", cfg.Server.TLSKey)
 	}
 	if cfg.Server.DrainTimeout != 15*time.Second {
 		t.Errorf("expected drain_timeout 15s, got %s", cfg.Server.DrainTimeout)
@@ -39,6 +45,24 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.Audit.PurgeFreq != 1*time.Hour {
 		t.Errorf("expected audit purge_freq 1h, got %s", cfg.Audit.PurgeFreq)
+	}
+	if cfg.LocalAdmin.PasswordHistory != 14 {
+		t.Errorf("expected password_history 14, got %d", cfg.LocalAdmin.PasswordHistory)
+	}
+	if cfg.LocalAdmin.MinLength != 12 {
+		t.Errorf("expected min_length 12, got %d", cfg.LocalAdmin.MinLength)
+	}
+	if !cfg.LocalAdmin.RequireUppercase {
+		t.Error("expected require_uppercase true by default")
+	}
+	if !cfg.LocalAdmin.RequireLowercase {
+		t.Error("expected require_lowercase true by default")
+	}
+	if !cfg.LocalAdmin.RequireDigit {
+		t.Error("expected require_digit true by default")
+	}
+	if !cfg.LocalAdmin.RequireSpecial {
+		t.Error("expected require_special true by default")
 	}
 }
 
@@ -128,8 +152,8 @@ func TestLoadMissingFileCreatesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Server.Addr != ":8080" {
-		t.Errorf("expected default addr, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8443" {
+		t.Errorf("expected default addr :8443, got %s", cfg.Server.Addr)
 	}
 	// Verify file was created.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -175,11 +199,11 @@ func TestValidationErrors(t *testing.T) {
 		},
 		{
 			name: "tls cert without key",
-			yaml: "server:\n  tls_cert: /path/to/cert.pem",
+			yaml: "server:\n  tls_cert: /path/to/cert.pem\n  tls_key: ''",
 		},
 		{
 			name: "tls key without cert",
-			yaml: "server:\n  tls_key: /path/to/key.pem",
+			yaml: "server:\n  tls_cert: ''\n  tls_key: /path/to/key.pem",
 		},
 		{
 			name: "empty audit file path",
@@ -192,6 +216,14 @@ func TestValidationErrors(t *testing.T) {
 		{
 			name: "audit purge freq zero with retention set",
 			yaml: "audit:\n  db_retention: 24h\n  purge_freq: 0s",
+		},
+		{
+			name: "local_admin min_length zero",
+			yaml: "local_admin:\n  min_length: 0",
+		},
+		{
+			name: "local_admin password_history negative",
+			yaml: "local_admin:\n  password_history: -1",
 		},
 	}
 
@@ -207,14 +239,14 @@ func TestValidationErrors(t *testing.T) {
 
 func TestTLSEnabled(t *testing.T) {
 	cfg := Defaults()
-	if cfg.TLSEnabled() {
-		t.Error("expected TLS disabled by default")
+	if !cfg.TLSEnabled() {
+		t.Error("expected TLS enabled by default")
 	}
 
-	cfg.Server.TLSCert = "/cert.pem"
-	cfg.Server.TLSKey = "/key.pem"
-	if !cfg.TLSEnabled() {
-		t.Error("expected TLS enabled")
+	cfg.Server.TLSCert = ""
+	cfg.Server.TLSKey = ""
+	if cfg.TLSEnabled() {
+		t.Error("expected TLS disabled when cert/key cleared")
 	}
 }
 
@@ -241,10 +273,8 @@ func TestLogLevel(t *testing.T) {
 }
 
 func TestSecureCookies(t *testing.T) {
-	// TLS configured → secure.
+	// TLS configured → secure (also true by default).
 	cfg := Defaults()
-	cfg.Server.TLSCert = "/etc/cert.pem"
-	cfg.Server.TLSKey = "/etc/key.pem"
 	if !cfg.SecureCookies() {
 		t.Error("expected SecureCookies true when TLS is configured")
 	}
@@ -258,8 +288,11 @@ func TestSecureCookies(t *testing.T) {
 
 	// Neither TLS nor proxy → not secure.
 	cfg3 := Defaults()
+	cfg3.Server.TLSCert = ""
+	cfg3.Server.TLSKey = ""
+	cfg3.Server.TrustProxy = false
 	if cfg3.SecureCookies() {
-		t.Error("expected SecureCookies false by default")
+		t.Error("expected SecureCookies false when TLS cleared and TrustProxy false")
 	}
 }
 
@@ -331,7 +364,7 @@ func TestValidateNegativeDBRetention(t *testing.T) {
 func TestValidateTLSMismatch(t *testing.T) {
 	cfg := Defaults()
 	cfg.Server.TLSCert = "/path/to/cert.pem"
-	// TLSKey left empty — should fail validation.
+	cfg.Server.TLSKey = "" // explicitly clear the key
 	if err := cfg.validate(); err == nil {
 		t.Error("expected error when tls_cert is set without tls_key")
 	}
@@ -343,8 +376,8 @@ func TestLoadCreatesDefaultFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Server.Addr != ":8080" {
-		t.Errorf("expected default addr :8080, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8443" {
+		t.Errorf("expected default addr :8443, got %s", cfg.Server.Addr)
 	}
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 		t.Error("expected default config file to be created")

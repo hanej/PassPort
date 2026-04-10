@@ -24,15 +24,17 @@ type ExportData struct {
 	SMTPConfig           *ExportSMTP           `json:"smtp_config"`
 	MFAProviders         []ExportMFAProvider   `json:"mfa_providers"`
 	DefaultMFAProviderID *string               `json:"default_mfa_provider_id"`
+	MFALoginRequired     bool                  `json:"mfa_login_required"`
 	Branding             *db.BrandingConfig    `json:"branding"`
 	EmailTemplates       []ExportEmailTemplate `json:"email_templates"`
 }
 
 // ExportLocalAdmin represents a local admin account in the export.
 type ExportLocalAdmin struct {
-	Username           string `json:"username"`
-	PasswordHash       string `json:"password_hash"`
-	MustChangePassword bool   `json:"must_change_password"`
+	Username           string   `json:"username"`
+	PasswordHash       string   `json:"password_hash"`
+	MustChangePassword bool     `json:"must_change_password"`
+	PasswordHistory    []string `json:"password_history,omitempty"`
 }
 
 // ExportIDP represents an identity provider in the export.
@@ -150,6 +152,7 @@ type ImportResult struct {
 	Branding       bool
 	EmailTemplates int
 	ReportConfigs  int
+	UploadFiles    int
 	Errors         []string
 }
 
@@ -163,6 +166,7 @@ type ImportSections struct {
 	MFA       bool
 	Branding  bool
 	Templates bool
+	Uploads   bool
 }
 
 // AllSections returns an ImportSections with everything enabled.
@@ -176,6 +180,7 @@ func AllSections() ImportSections {
 		MFA:       true,
 		Branding:  true,
 		Templates: true,
+		Uploads:   true,
 	}
 }
 
@@ -313,11 +318,13 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 		return fmt.Errorf("list local admins: %w", err)
 	}
 	for _, a := range admins {
-		data.LocalAdmins = append(data.LocalAdmins, ExportLocalAdmin{
+		ea := ExportLocalAdmin{
 			Username:           a.Username,
 			PasswordHash:       a.PasswordHash,
 			MustChangePassword: a.MustChangePassword,
-		})
+		}
+		ea.PasswordHistory, _ = store.GetPasswordHistory(ctx, a.Username)
+		data.LocalAdmins = append(data.LocalAdmins, ea)
 	}
 
 	// 2. Identity providers with related data
@@ -476,6 +483,12 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 		data.DefaultMFAProviderID = defaultMFAID
 	}
 
+	// 7a. MFA login required setting
+	mfaLoginRequired, err := store.GetMFALoginRequired(ctx)
+	if err == nil {
+		data.MFALoginRequired = mfaLoginRequired
+	}
+
 	// 8. Branding
 	branding, err := store.GetBrandingConfig(ctx)
 	if err == nil && branding != nil {
@@ -530,6 +543,12 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 					if err := store.UpdateLocalAdminPassword(ctx, a.Username, a.PasswordHash, false); err != nil {
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to update admin %s must_change flag: %v", a.Username, err))
 					}
+				}
+			}
+			// Restore password history (most-recent-first; AddPasswordHistory with keepN=0 appends without trimming).
+			for _, h := range a.PasswordHistory {
+				if err := store.AddPasswordHistory(ctx, a.Username, h, 0); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to restore password history for %s: %v", a.Username, err))
 				}
 			}
 			result.LocalAdmins++
@@ -795,6 +814,13 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 	if sections.MFA && data.DefaultMFAProviderID != nil {
 		if err := store.SetDefaultMFAProviderID(ctx, data.DefaultMFAProviderID); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("Failed to restore default MFA provider: %v", err))
+		}
+	}
+
+	// 7a. MFA login required setting
+	if sections.MFA {
+		if err := store.SetMFALoginRequired(ctx, data.MFALoginRequired); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Failed to restore MFA login required setting: %v", err))
 		}
 	}
 

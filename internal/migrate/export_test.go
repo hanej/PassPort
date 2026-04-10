@@ -2355,3 +2355,95 @@ func TestRunImport_SaveEmailTemplateError(t *testing.T) {
 		t.Errorf("expected 0 email templates imported, got %d", result.EmailTemplates)
 	}
 }
+
+// TestBuildExport_ReportConfigWithFilters covers the ListReportFilters path
+// inside BuildExport when an IDP has report configs with filters.
+func TestBuildExport_ReportConfigWithFilters(t *testing.T) {
+	store := openTestDB(t)
+	cryptoSvc := newCrypto(t)
+	ctx := context.Background()
+
+	seedIDP(t, store, cryptoSvc, "idp-1", "Test LDAP")
+
+	// Create a report config for the IDP.
+	if err := store.SaveReportConfig(ctx, &db.ReportConfig{
+		IDPID:                "idp-1",
+		ReportType:           db.ReportTypeExpiration,
+		Enabled:              true,
+		CronSchedule:         "0 7 * * 1",
+		DaysBeforeExpiration: 7,
+		Recipients:           "admin@example.com",
+	}); err != nil {
+		t.Fatalf("SaveReportConfig: %v", err)
+	}
+
+	// Add report filters so the ListReportFilters branch is hit.
+	if err := store.SaveReportFilters(ctx, "idp-1", string(db.ReportTypeExpiration), []db.ReportFilter{
+		{Attribute: "department", Pattern: "Engineering", Description: "Engineering dept"},
+	}); err != nil {
+		t.Fatalf("SaveReportFilters: %v", err)
+	}
+
+	data, err := BuildExport(ctx, store, cryptoSvc)
+	if err != nil {
+		t.Fatalf("BuildExport: %v", err)
+	}
+
+	if len(data.IdentityProviders) != 1 {
+		t.Fatalf("expected 1 IDP, got %d", len(data.IdentityProviders))
+	}
+	ei := data.IdentityProviders[0]
+	if len(ei.ReportConfigs) != 1 {
+		t.Fatalf("expected 1 report config, got %d", len(ei.ReportConfigs))
+	}
+	if len(ei.ReportConfigs[0].Filters) != 1 {
+		t.Errorf("expected 1 report filter, got %d", len(ei.ReportConfigs[0].Filters))
+	}
+}
+
+// TestRunImport_ReportConfigWithFilters covers the report config import path when
+// filters are included (export.go lines 650–665).
+func TestRunImport_ReportConfigWithFilters(t *testing.T) {
+	store := openTestDB(t)
+	cryptoSvc := newCrypto(t)
+	ctx := context.Background()
+
+	data := &ExportData{
+		Version:          1,
+		ExportedAt:       time.Now().UTC().Format(time.RFC3339),
+		SecretsEncrypted: false,
+		IdentityProviders: []ExportIDP{
+			{
+				ID:           "idp-rc",
+				FriendlyName: "RC IDP",
+				ProviderType: "ad",
+				Enabled:      true,
+				Config:       json.RawMessage(`{"host":"ldap.example.com"}`),
+				Secrets:      json.RawMessage(`{"password":"secret"}`),
+				ReportConfigs: []ExportReportConfig{
+					{
+						ReportType:           "expiration",
+						Enabled:              true,
+						CronSchedule:         "0 6 * * *",
+						DaysBeforeExpiration: 14,
+						Recipients:           "ops@example.com",
+						Filters: []ExportReportFilter{
+							{Attribute: "department", Pattern: "Engineering", Description: "Eng dept"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := RunImport(ctx, store, cryptoSvc, data, ImportSections{IDPs: true})
+	if err != nil {
+		t.Fatalf("RunImport: %v", err)
+	}
+	if len(result.Errors) > 0 {
+		t.Errorf("unexpected import errors: %v", result.Errors)
+	}
+	if result.ReportConfigs != 1 {
+		t.Errorf("expected 1 report config imported, got %d", result.ReportConfigs)
+	}
+}

@@ -21,6 +21,7 @@
                     aria-expanded="false"
                     aria-controls="collapse-{{$idpID}}">
                 <div class="d-flex align-items-center gap-2 flex-wrap flex-grow-1 me-2">
+                    {{if .IDP.LogoURL}}<img src="{{.IDP.LogoURL}}" alt="" height="24" style="flex-shrink: 0; vertical-align: middle;">{{end}}
                     <span class="fw-semibold">{{.IDP.FriendlyName}}</span>
                     {{if eq .IDP.ProviderType "ad"}}
                     <span class="badge badge-ad badge-sm">Active Directory</span>

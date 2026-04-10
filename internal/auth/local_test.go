@@ -25,13 +25,19 @@ func (e *errAdminStore) UpdateLocalAdminPassword(ctx context.Context, username, 
 func (e *errAdminStore) ListLocalAdmins(ctx context.Context) ([]db.LocalAdmin, error) {
 	return nil, nil
 }
+func (e *errAdminStore) AddPasswordHistory(ctx context.Context, username, passwordHash string, keepN int) error {
+	return nil
+}
+func (e *errAdminStore) GetPasswordHistory(ctx context.Context, username string) ([]string, error) {
+	return nil, nil
+}
 
 func TestBootstrap_GetAdminError(t *testing.T) {
 	// When GetLocalAdmin returns a non-ErrNotFound error, Bootstrap should return that error.
 	store := &errAdminStore{}
 	logger := slog.Default()
 
-	_, err := Bootstrap(context.Background(), store, logger)
+	_, err := Bootstrap(context.Background(), store, 14, logger)
 	if err == nil {
 		t.Fatal("expected error when GetLocalAdmin fails with unknown error")
 	}
@@ -53,10 +59,16 @@ func (e *errCreateAdminStore) UpdateLocalAdminPassword(ctx context.Context, user
 func (e *errCreateAdminStore) ListLocalAdmins(ctx context.Context) ([]db.LocalAdmin, error) {
 	return nil, nil
 }
+func (e *errCreateAdminStore) AddPasswordHistory(ctx context.Context, username, passwordHash string, keepN int) error {
+	return nil
+}
+func (e *errCreateAdminStore) GetPasswordHistory(ctx context.Context, username string) ([]string, error) {
+	return nil, nil
+}
 
 func TestBootstrap_CreateAdminError(t *testing.T) {
 	store := &errCreateAdminStore{}
-	_, err := Bootstrap(context.Background(), store, slog.Default())
+	_, err := Bootstrap(context.Background(), store, 14, slog.Default())
 	if err == nil {
 		t.Fatal("expected error when CreateLocalAdmin fails")
 	}
@@ -117,7 +129,7 @@ func TestBootstrapCreatesAdmin(t *testing.T) {
 	d := newTestDB(t)
 	logger := slog.Default()
 
-	password, err := Bootstrap(context.Background(), d, logger)
+	password, err := Bootstrap(context.Background(), d, 14, logger)
 	if err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
@@ -145,13 +157,13 @@ func TestBootstrapReturnEmptyOnSecondCall(t *testing.T) {
 	logger := slog.Default()
 
 	// First call creates the admin.
-	_, err := Bootstrap(context.Background(), d, logger)
+	_, err := Bootstrap(context.Background(), d, 14, logger)
 	if err != nil {
 		t.Fatalf("first Bootstrap: %v", err)
 	}
 
 	// Second call should return empty string.
-	password, err := Bootstrap(context.Background(), d, logger)
+	password, err := Bootstrap(context.Background(), d, 14, logger)
 	if err != nil {
 		t.Fatalf("second Bootstrap: %v", err)
 	}
@@ -164,7 +176,7 @@ func TestBootstrapSetsMustChangePassword(t *testing.T) {
 	d := newTestDB(t)
 	logger := slog.Default()
 
-	_, err := Bootstrap(context.Background(), d, logger)
+	_, err := Bootstrap(context.Background(), d, 14, logger)
 	if err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
@@ -264,5 +276,156 @@ func TestHashPassword_TooLong(t *testing.T) {
 	_, err := HashPassword(long)
 	if err == nil {
 		t.Fatal("expected error for password exceeding bcrypt's 72-byte limit")
+	}
+}
+
+// ---- Password policy tests ----
+
+func TestValidatePasswordPolicy_AllConstraintsMet(t *testing.T) {
+	policy := PasswordPolicy{
+		MinLength:        12,
+		RequireUppercase: true,
+		RequireLowercase: true,
+		RequireDigit:     true,
+		RequireSpecial:   true,
+	}
+	if err := ValidatePasswordPolicy("Secure1Pass!", policy); err != nil {
+		t.Errorf("expected nil, got %v", err)
+	}
+}
+
+func TestValidatePasswordPolicy_TooShort(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 12}
+	if err := ValidatePasswordPolicy("short", policy); err == nil {
+		t.Error("expected error for short password")
+	}
+}
+
+func TestValidatePasswordPolicy_MissingUppercase(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 1, RequireUppercase: true}
+	if err := ValidatePasswordPolicy("nouppercase1!", policy); err == nil {
+		t.Error("expected error for missing uppercase")
+	}
+}
+
+func TestValidatePasswordPolicy_MissingLowercase(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 1, RequireLowercase: true}
+	if err := ValidatePasswordPolicy("NOLOWERCASE1!", policy); err == nil {
+		t.Error("expected error for missing lowercase")
+	}
+}
+
+func TestValidatePasswordPolicy_MissingDigit(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 1, RequireDigit: true}
+	if err := ValidatePasswordPolicy("NoDigitHere!", policy); err == nil {
+		t.Error("expected error for missing digit")
+	}
+}
+
+func TestValidatePasswordPolicy_MissingSpecial(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 1, RequireSpecial: true}
+	if err := ValidatePasswordPolicy("NoSpecial1A", policy); err == nil {
+		t.Error("expected error for missing special character")
+	}
+}
+
+func TestValidatePasswordPolicy_EmptyPolicyAlwaysPasses(t *testing.T) {
+	policy := PasswordPolicy{MinLength: 1}
+	if err := ValidatePasswordPolicy("x", policy); err != nil {
+		t.Errorf("empty policy should accept any non-empty password: %v", err)
+	}
+}
+
+// ---- Password history tests ----
+
+func TestCheckPasswordHistory_NoMatch(t *testing.T) {
+	h1, _ := HashPassword("oldpass1")
+	h2, _ := HashPassword("oldpass2")
+	if err := CheckPasswordHistory("newpass", []string{h1, h2}); err != nil {
+		t.Errorf("expected nil for new password, got %v", err)
+	}
+}
+
+func TestCheckPasswordHistory_Match(t *testing.T) {
+	h1, _ := HashPassword("reused")
+	if err := CheckPasswordHistory("reused", []string{h1}); err == nil {
+		t.Error("expected error when password matches history")
+	}
+}
+
+func TestCheckPasswordHistory_EmptyHistory(t *testing.T) {
+	if err := CheckPasswordHistory("anything", nil); err != nil {
+		t.Errorf("empty history should never block: %v", err)
+	}
+}
+
+func TestAddAndGetPasswordHistory(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	// Seed an admin so the FK is satisfied.
+	hash, _ := HashPassword("initial")
+	if _, err := d.CreateLocalAdmin(ctx, "admin", hash); err != nil {
+		t.Fatalf("CreateLocalAdmin: %v", err)
+	}
+
+	// Add a few passwords.
+	for i, pw := range []string{"pass1", "pass2", "pass3"} {
+		h, _ := HashPassword(pw)
+		if err := d.AddPasswordHistory(ctx, "admin", h, 10); err != nil {
+			t.Fatalf("AddPasswordHistory[%d]: %v", i, err)
+		}
+	}
+
+	hashes, err := d.GetPasswordHistory(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetPasswordHistory: %v", err)
+	}
+	if len(hashes) != 3 {
+		t.Errorf("expected 3 history entries, got %d", len(hashes))
+	}
+}
+
+func TestPasswordHistoryTrimming(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	hash, _ := HashPassword("initial")
+	if _, err := d.CreateLocalAdmin(ctx, "admin", hash); err != nil {
+		t.Fatalf("CreateLocalAdmin: %v", err)
+	}
+
+	// Add 5 entries but keep only 3.
+	for i := 0; i < 5; i++ {
+		h, _ := HashPassword(fmt.Sprintf("pass%d", i))
+		if err := d.AddPasswordHistory(ctx, "admin", h, 3); err != nil {
+			t.Fatalf("AddPasswordHistory[%d]: %v", i, err)
+		}
+	}
+
+	hashes, err := d.GetPasswordHistory(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetPasswordHistory: %v", err)
+	}
+	if len(hashes) != 3 {
+		t.Errorf("expected 3 history entries after trimming, got %d", len(hashes))
+	}
+}
+
+func TestBootstrapRecordsInitialHistory(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	_, err := Bootstrap(ctx, d, 14, slog.Default())
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+
+	hashes, err := d.GetPasswordHistory(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetPasswordHistory: %v", err)
+	}
+	if len(hashes) != 1 {
+		t.Errorf("expected 1 history entry after bootstrap, got %d", len(hashes))
 	}
 }

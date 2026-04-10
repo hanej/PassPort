@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -73,7 +74,7 @@ func setupMigrateTest(t *testing.T) *migrateTestEnv {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLog, logger)
+	h := NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLog, logger, t.TempDir())
 
 	return &migrateTestEnv{
 		db:      database,
@@ -157,8 +158,8 @@ func TestMigrateExport(t *testing.T) {
 
 	// Verify content type
 	ct := rec.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Errorf("expected Content-Type application/json, got %s", ct)
+	if ct != "application/zip" {
+		t.Errorf("expected Content-Type application/zip, got %s", ct)
 	}
 
 	// Verify Content-Disposition
@@ -166,11 +167,33 @@ func TestMigrateExport(t *testing.T) {
 	if !strings.HasPrefix(cd, "attachment; filename=") {
 		t.Errorf("expected attachment Content-Disposition, got %s", cd)
 	}
+	if !strings.Contains(cd, ".zip") {
+		t.Errorf("expected .zip filename in Content-Disposition, got %s", cd)
+	}
 
-	// Verify JSON structure
+	// Verify ZIP contains passport-export.json with correct content
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("opening export as zip: %v", err)
+	}
+	var jsonFile *zip.File
+	for _, f := range zr.File {
+		if f.Name == "passport-export.json" {
+			jsonFile = f
+			break
+		}
+	}
+	if jsonFile == nil {
+		t.Fatal("passport-export.json not found in export zip")
+	}
+	rc, err := jsonFile.Open()
+	if err != nil {
+		t.Fatalf("opening passport-export.json from zip: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
 	var data migrate.ExportData
-	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
-		t.Fatalf("unmarshaling export JSON: %v", err)
+	if err := json.NewDecoder(rc).Decode(&data); err != nil {
+		t.Fatalf("decoding passport-export.json: %v", err)
 	}
 	if data.Version != 1 {
 		t.Errorf("expected version 1, got %d", data.Version)
@@ -336,9 +359,24 @@ func TestMigrateImport_SectionsRespected(t *testing.T) {
 	}
 }
 
-// buildImportRequest creates a multipart form request with a JSON import file and optional form fields.
+// buildImportRequest creates a multipart form request with a ZIP import file containing
+// passport-export.json with the given bytes, plus optional form fields.
 func buildImportRequest(t *testing.T, jsonBytes []byte, fields map[string]string) *http.Request {
 	t.Helper()
+
+	// Wrap jsonBytes in a ZIP archive as passport-export.json
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	je, err := zw.Create("passport-export.json")
+	if err != nil {
+		t.Fatalf("creating zip entry: %v", err)
+	}
+	if _, err := je.Write(jsonBytes); err != nil {
+		t.Fatalf("writing json to zip: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing zip: %v", err)
+	}
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
@@ -350,12 +388,12 @@ func buildImportRequest(t *testing.T, jsonBytes []byte, fields map[string]string
 		}
 	}
 
-	// Add the JSON file
-	fw, err := w.CreateFormFile("import_file", "export.json")
+	// Add the ZIP file
+	fw, err := w.CreateFormFile("import_file", "export.zip")
 	if err != nil {
 		t.Fatalf("creating form file: %v", err)
 	}
-	if _, err := fw.Write(jsonBytes); err != nil {
+	if _, err := fw.Write(zipBuf.Bytes()); err != nil {
 		t.Fatalf("writing file contents: %v", err)
 	}
 	_ = w.Close()
@@ -416,7 +454,7 @@ func TestMigrateExport_BuildExportError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger)
+	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/migrate/export", nil)
 	rec := httptest.NewRecorder()
@@ -569,7 +607,7 @@ func TestMigrateImport_CreateIDPError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger)
+	h := NewAdminMigrateHandler(mock, cryptoSvc, renderer, auditLog, logger, "")
 
 	// Need a session so the handler can access sess.Username for audit logging.
 	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
@@ -613,5 +651,183 @@ func TestMigrateImport_CreateIDPError(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "migrate page") {
 		t.Errorf("expected migrate page, got: %s", rec.Body.String())
+	}
+}
+
+// TestMigrateImport_InvalidZip sends raw bytes that are not a valid ZIP archive,
+// covering the zip.NewReader error path (lines 179-182).
+func TestMigrateImport_InvalidZip(t *testing.T) {
+	env := setupMigrateTest(t)
+	cookies := env.createAdminSession(t)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("import_file", "bad.zip")
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("this is not a zip file at all")); err != nil {
+		t.Fatalf("writing: %v", err)
+	}
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/migrate/import", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := env.serveWithAdminSession(t, env.handler.Import, http.MethodPost, "/admin/migrate/import", cookies, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 (error page), got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "migrate page") {
+		t.Errorf("expected error rendered in migrate page, got: %s", rec.Body.String())
+	}
+}
+
+// TestMigrateImport_NoJsonInArchive sends a valid ZIP that does not contain
+// passport-export.json, covering the continue-in-loop path (line 189) and the
+// "archive does not contain" error path (lines 208-211).
+func TestMigrateImport_NoJsonInArchive(t *testing.T) {
+	env := setupMigrateTest(t)
+	cookies := env.createAdminSession(t)
+
+	// Build a ZIP with an unrelated file.
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	e, err := zw.Create("readme.txt")
+	if err != nil {
+		t.Fatalf("creating zip entry: %v", err)
+	}
+	if _, err := e.Write([]byte("hello")); err != nil {
+		t.Fatalf("writing zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing zip: %v", err)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("import_file", "no-json.zip")
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := fw.Write(zipBuf.Bytes()); err != nil {
+		t.Fatalf("writing: %v", err)
+	}
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/migrate/import", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := env.serveWithAdminSession(t, env.handler.Import, http.MethodPost, "/admin/migrate/import", cookies, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 (error page), got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "migrate page") {
+		t.Errorf("expected migrate page with error, got: %s", rec.Body.String())
+	}
+}
+
+// TestMigrateImport_WithUploadFiles sends a ZIP containing both passport-export.json
+// and an uploads/ file, covering the upload restore code path (lines 238-262).
+func TestMigrateImport_WithUploadFiles(t *testing.T) {
+	env := setupMigrateTest(t)
+	cookies := env.createAdminSession(t)
+
+	exportData := migrate.ExportData{
+		Version:    1,
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	jsonBytes, err := json.Marshal(exportData)
+	if err != nil {
+		t.Fatalf("marshaling export data: %v", err)
+	}
+
+	// Build a ZIP with passport-export.json + an uploads/ file.
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	je, err := zw.Create("passport-export.json")
+	if err != nil {
+		t.Fatalf("creating json zip entry: %v", err)
+	}
+	if _, err := je.Write(jsonBytes); err != nil {
+		t.Fatalf("writing json: %v", err)
+	}
+	ue, err := zw.Create("uploads/logo.png")
+	if err != nil {
+		t.Fatalf("creating uploads zip entry: %v", err)
+	}
+	if _, err := ue.Write([]byte("fake png data")); err != nil {
+		t.Fatalf("writing upload: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing zip: %v", err)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if err := w.WriteField("import_uploads", "1"); err != nil {
+		t.Fatalf("writing import_uploads field: %v", err)
+	}
+	fw, err := w.CreateFormFile("import_file", "export.zip")
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := fw.Write(zipBuf.Bytes()); err != nil {
+		t.Fatalf("writing: %v", err)
+	}
+	_ = w.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/migrate/import", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := env.serveWithAdminSession(t, env.handler.Import, http.MethodPost, "/admin/migrate/import", cookies, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the upload file was restored.
+	uploadsDir := env.handler.uploadsDir
+	restoredPath := uploadsDir + "/logo.png"
+	if _, statErr := os.Stat(restoredPath); os.IsNotExist(statErr) {
+		t.Error("expected uploads/logo.png to be restored after import")
+	}
+}
+
+// TestMigrateExport_WithUploads exercises the uploads walk in Export
+// (lines 111-125) by placing a file in the uploads directory.
+func TestMigrateExport_WithUploads(t *testing.T) {
+	env := setupMigrateTest(t)
+
+	// Place a file in the uploads directory used by the handler.
+	uploadsDir := env.handler.uploadsDir
+	if err := os.MkdirAll(uploadsDir, 0750); err != nil {
+		t.Fatalf("creating uploads dir: %v", err)
+	}
+	testFile := uploadsDir + "/test-logo.png"
+	if err := os.WriteFile(testFile, []byte("fake png"), 0640); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
+
+	cookies := env.createAdminSession(t)
+	rec := env.serveWithAdminSession(t, env.handler.Export, http.MethodGet, "/admin/migrate/export", cookies, nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the ZIP contains the upload file.
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("opening export as zip: %v", err)
+	}
+	var found bool
+	for _, f := range zr.File {
+		if f.Name == "uploads/test-logo.png" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected uploads/test-logo.png in export archive")
 	}
 }

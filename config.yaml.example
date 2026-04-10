@@ -2,17 +2,20 @@
 # Startup configuration. All other settings are managed via the Admin UI.
 
 server:
-  # Address to listen on (e.g., ":8080", "0.0.0.0:8443")
-  addr: ":8080"
+  # Address to listen on
+  addr: ":8443"
 
-  # TLS certificate and key paths (optional; omit for plain HTTP)
-  # tls_cert: /etc/passport/tls/cert.pem
-  # tls_key: /etc/passport/tls/key.pem
+  # TLS certificate and key paths.
+  # A self-signed certificate is generated at install time by the postinstall script.
+  # Replace with a CA-signed certificate for production use.
+  tls_cert: /etc/passport/tls/cert.pem
+  tls_key: /etc/passport/tls/key.pem
 
   # Set to true if running behind a reverse proxy that terminates TLS.
   # This trusts X-Forwarded-Proto to determine if the connection is secure,
   # and sets the Secure flag on cookies accordingly.
-  trust_proxy: true
+  # Leave false when PassPort terminates TLS directly (the default).
+  trust_proxy: false
 
   # Time to wait for in-flight requests to complete on shutdown
   drain_timeout: 15s
@@ -51,4 +54,23 @@ audit:
 
   # How often the DB audit purge runs
   purge_freq: 1h
+
+local_admin:
+  # How many previous password hashes to retain for reuse prevention.
+  password_history: 14
+
+  # Minimum password length.
+  min_length: 12
+
+  # Require at least one uppercase letter.
+  require_uppercase: true
+
+  # Require at least one lowercase letter.
+  require_lowercase: true
+
+  # Require at least one digit.
+  require_digit: true
+
+  # Require at least one special character.
+  require_special: true
 
