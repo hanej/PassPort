@@ -303,7 +303,7 @@ func main() {
 	correlator := &correlatorAdapter{engine: correlationEngine}
 
 	// Initialize template renderer
-	renderer, err := handler.NewRenderer(logger)
+	renderer, err := handler.NewRenderer(version, logger)
 	if err != nil {
 		logger.Error("failed to create renderer", "error", err)
 		os.Exit(1)
@@ -350,7 +350,7 @@ func main() {
 	adminMappingsHandler := handler.NewAdminMappingsHandler(database, registry, renderer, auditLogger, logger)
 	adminAuditHandler := handler.NewAdminAuditHandler(database, renderer, logger)
 	adminBrandingHandler := handler.NewAdminBrandingHandler(database, renderer, auditLogger, logger, uploadsDir)
-	adminMigrateHandler := handler.NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLogger, logger)
+	adminMigrateHandler := handler.NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLogger, logger, uploadsDir)
 	adminDocsHandler := handler.NewAdminDocsHandler(renderer, logger, docs.GuideMarkdown)
 	adminReportsHandler := handler.NewAdminReportsHandler(database, reportScheduler, renderer, auditLogger, logger)
 

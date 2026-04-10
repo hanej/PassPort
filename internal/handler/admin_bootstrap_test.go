@@ -264,10 +264,12 @@ func TestShowChangePassword_Direct(t *testing.T) {
 	}
 }
 
-// mockBootstrapAdminStore wraps *db.DB and overrides UpdateLocalAdminPassword to inject errors.
+// mockBootstrapAdminStore wraps *db.DB and overrides methods to inject errors.
 type mockBootstrapAdminStore struct {
 	*db.DB
 	updatePasswordErr error
+	getHistoryErr     error
+	addHistoryErr     error
 }
 
 func (m *mockBootstrapAdminStore) UpdateLocalAdminPassword(ctx context.Context, username, passwordHash string, mustChange bool) error {
@@ -275,6 +277,20 @@ func (m *mockBootstrapAdminStore) UpdateLocalAdminPassword(ctx context.Context, 
 		return m.updatePasswordErr
 	}
 	return m.DB.UpdateLocalAdminPassword(ctx, username, passwordHash, mustChange)
+}
+
+func (m *mockBootstrapAdminStore) GetPasswordHistory(ctx context.Context, username string) ([]string, error) {
+	if m.getHistoryErr != nil {
+		return nil, m.getHistoryErr
+	}
+	return m.DB.GetPasswordHistory(ctx, username)
+}
+
+func (m *mockBootstrapAdminStore) AddPasswordHistory(ctx context.Context, username, passwordHash string, keepN int) error {
+	if m.addHistoryErr != nil {
+		return m.addHistoryErr
+	}
+	return m.DB.AddPasswordHistory(ctx, username, passwordHash, keepN)
 }
 
 // TestChangePassword_PolicyViolation covers the ValidatePasswordPolicy failure path.
@@ -403,5 +419,217 @@ func TestChangePassword_DBError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 when UpdateLocalAdminPassword fails, got %d", rec.Code)
+	}
+}
+
+// bootstrapHandlerWithMock creates a BootstrapHandler backed by the given store.
+func bootstrapHandlerWithMock(t *testing.T, store db.AdminStore, sm *auth.SessionManager, policy auth.PasswordPolicy) (*BootstrapHandler, *audit.Logger) {
+	t.Helper()
+
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	renderer := stubRenderer(t)
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
+	if err != nil {
+		t.Fatalf("creating temp audit file: %v", err)
+	}
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	h := NewBootstrapHandler(store, sm, renderer, auditLog, policy, logger)
+	return h, auditLog
+}
+
+// TestChangePassword_HistoryCheckSuccess covers the password-history block
+// (lines 95-109) when HistoryLen > 0 and the new password is not in history.
+func TestChangePassword_HistoryCheckSuccess(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	policy := auth.PasswordPolicy{HistoryLen: 3}
+	h, auditLog := bootstrapHandlerWithMock(t, database, sm, policy)
+	_ = auditLog
+
+	// Create the admin account in the same database.
+	hash, err := auth.HashPassword("old-password")
+	if err != nil {
+		t.Fatalf("hashing password: %v", err)
+	}
+	if _, err := database.CreateLocalAdmin(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+
+	sessionRec := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err := sm.CreateSession(sessionRec, sessionReq, "local", "", "admin", true, true); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	cookies := sessionRec.Result().Cookies()
+
+	form := url.Values{}
+	form.Set("new_password", "brand-new-password-1!")
+	form.Set("confirm_password", "brand-new-password-1!")
+
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	wrapped := sm.Middleware(http.HandlerFunc(h.ChangePassword))
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected redirect after successful change, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestChangePassword_HistoryReuse covers the password-history reuse rejection path
+// (lines 102-109): HistoryLen > 0 and the new password matches a history entry.
+func TestChangePassword_HistoryReuse(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	policy := auth.PasswordPolicy{HistoryLen: 5}
+	h, auditLog := bootstrapHandlerWithMock(t, database, sm, policy)
+	_ = auditLog
+
+	const reusedPw = "reused-password-1!"
+	hash, err := auth.HashPassword(reusedPw)
+	if err != nil {
+		t.Fatalf("hashing password: %v", err)
+	}
+	if _, err := database.CreateLocalAdmin(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+	// Pre-load the password into history so it will be rejected.
+	if err := database.AddPasswordHistory(context.Background(), "admin", hash, 5); err != nil {
+		t.Fatalf("adding history: %v", err)
+	}
+
+	sessionRec := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err := sm.CreateSession(sessionRec, sessionReq, "local", "", "admin", true, true); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	cookies := sessionRec.Result().Cookies()
+
+	form := url.Values{}
+	form.Set("new_password", reusedPw)
+	form.Set("confirm_password", reusedPw)
+
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	wrapped := sm.Middleware(http.HandlerFunc(h.ChangePassword))
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusFound {
+		t.Error("should not redirect when password was recently used")
+	}
+}
+
+// TestChangePassword_GetHistoryError covers lines 97-101 where GetPasswordHistory
+// returns an error and the handler returns 500.
+func TestChangePassword_GetHistoryError(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	mockStore := &mockBootstrapAdminStore{
+		DB:            database,
+		getHistoryErr: fmt.Errorf("db history failure"),
+	}
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	policy := auth.PasswordPolicy{HistoryLen: 3}
+	h, auditLog := bootstrapHandlerWithMock(t, mockStore, sm, policy)
+	_ = auditLog
+
+	hash, err := auth.HashPassword("old-pass")
+	if err != nil {
+		t.Fatalf("hashing: %v", err)
+	}
+	if _, err := database.CreateLocalAdmin(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+	sessionRec := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err := sm.CreateSession(sessionRec, sessionReq, "local", "", "admin", true, true); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	cookies := sessionRec.Result().Cookies()
+
+	form := url.Values{}
+	form.Set("new_password", "brand-new-pass-1!")
+	form.Set("confirm_password", "brand-new-pass-1!")
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	wrapped := sm.Middleware(http.HandlerFunc(h.ChangePassword))
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when GetPasswordHistory fails, got %d", rec.Code)
+	}
+}
+
+// TestChangePassword_AddHistoryWarn covers line 126-128 where AddPasswordHistory
+// returns an error (non-fatal warning path).
+func TestChangePassword_AddHistoryWarn(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	mockStore := &mockBootstrapAdminStore{
+		DB:            database,
+		addHistoryErr: fmt.Errorf("history write failed"),
+	}
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	// HistoryLen=0 so history check is skipped; AddPasswordHistory is still
+	// called for recording the new hash.
+	policy := auth.PasswordPolicy{HistoryLen: 1}
+	h, auditLog := bootstrapHandlerWithMock(t, mockStore, sm, policy)
+	_ = auditLog
+
+	hash, err := auth.HashPassword("old-pass")
+	if err != nil {
+		t.Fatalf("hashing: %v", err)
+	}
+	if _, err := database.CreateLocalAdmin(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+	sessionRec := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err := sm.CreateSession(sessionRec, sessionReq, "local", "", "admin", true, true); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	cookies := sessionRec.Result().Cookies()
+
+	form := url.Values{}
+	form.Set("new_password", "brand-new-pass-2!")
+	form.Set("confirm_password", "brand-new-pass-2!")
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	wrapped := sm.Middleware(http.HandlerFunc(h.ChangePassword))
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	// AddPasswordHistory failure is a warning — change should still succeed.
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected redirect despite AddPasswordHistory error, got %d; body: %s", rec.Code, rec.Body.String())
 	}
 }

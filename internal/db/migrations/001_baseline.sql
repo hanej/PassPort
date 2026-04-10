@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS admin_groups (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id                   TEXT    PRIMARY KEY,
-    user_type            TEXT    NOT NULL CHECK (user_type IN ('local', 'provider', 'reset')),
+    user_type            TEXT    NOT NULL CHECK (user_type IN ('local', 'provider', 'reset', 'flash')),
     provider_id          TEXT,
     username             TEXT    NOT NULL,
     is_admin             INTEGER NOT NULL DEFAULT 0,

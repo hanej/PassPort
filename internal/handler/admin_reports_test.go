@@ -852,6 +852,87 @@ func (m *mockReportsListFiltersErrStore) ListReportFilters(ctx context.Context, 
 	return nil, fmt.Errorf("reload list error")
 }
 
+// TestAdminReportsList_WithReportConfigs covers the switch branches inside List
+// that assign entry.Expiration and entry.Expired when configs exist.
+func TestAdminReportsList_WithReportConfigs(t *testing.T) {
+	env := setupReportsTest(t)
+	cookies := env.createAdminSession(t)
+	ctx := context.Background()
+	env.createReportsTestIDP(t, "corp-ad", "ad")
+
+	if err := env.db.SaveReportConfig(ctx, &db.ReportConfig{
+		IDPID:                "corp-ad",
+		ReportType:           db.ReportTypeExpiration,
+		Enabled:              true,
+		CronSchedule:         "0 7 * * 1",
+		DaysBeforeExpiration: 14,
+	}); err != nil {
+		t.Fatalf("saving expiration config: %v", err)
+	}
+	if err := env.db.SaveReportConfig(ctx, &db.ReportConfig{
+		IDPID:        "corp-ad",
+		ReportType:   db.ReportTypeExpired,
+		Enabled:      true,
+		CronSchedule: "0 7 * * 1",
+	}); err != nil {
+		t.Fatalf("saving expired config: %v", err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		env.handler.List(w, r)
+	})
+	rec := env.serveWithAdminSession(t, handler, http.MethodGet, "/admin/reports", cookies, "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "reports list page") {
+		t.Errorf("expected reports list page content, got: %s", rec.Body.String())
+	}
+}
+
+// TestAdminReportsShow_ListFiltersError covers the branch where ListReportFilters
+// fails — the handler silently sets filters to nil and renders the page normally.
+func TestAdminReportsShow_ListFiltersError(t *testing.T) {
+	database := setupTestDB(t)
+	if err := database.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID:           "corp-ad",
+		FriendlyName: "Corp AD",
+		ProviderType: "ad",
+		Enabled:      true,
+		ConfigJSON:   `{"endpoint":"ldap.example.com:636","protocol":"ldaps","base_dn":"dc=example,dc=com"}`,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+
+	mock := &mockReportsListFiltersErrStore{DB: database}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	renderer := stubReportsRenderer(t)
+	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
+	if err != nil {
+		t.Fatalf("creating temp audit file: %v", err)
+	}
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	h := NewAdminReportsHandler(mock, nil, renderer, auditLog, logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/reports/corp-ad/expiration", nil)
+	req = withReportChiURLParams(req, "corp-ad", db.ReportTypeExpiration)
+	rec := httptest.NewRecorder()
+	h.Show(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 when ListReportFilters fails, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "report config page") {
+		t.Errorf("expected report config page content, got: %s", rec.Body.String())
+	}
+}
+
 // --- SendNow handler tests ---
 
 func TestAdminReportsSendNow_UnknownType(t *testing.T) {

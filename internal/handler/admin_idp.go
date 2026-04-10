@@ -48,6 +48,10 @@ func NewAdminIDPHandler(
 	logger *slog.Logger,
 	uploadsDir string,
 ) *AdminIDPHandler {
+	// Ensure uploads directory exists.
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		logger.Error("failed to create uploads directory", "path", uploadsDir, "error", err)
+	}
 	return &AdminIDPHandler{
 		store:      store,
 		crypto:     cryptoSvc,
@@ -110,6 +114,104 @@ func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoUR
 	}
 
 	return "/uploads/" + destName
+}
+
+// UploadLogo handles an async logo upload for an existing IDP.
+// POST /admin/idp/{id}/logo
+// Returns JSON {"logo_url": "..."} on success or {"error": "..."} on failure.
+func (h *AdminIDPHandler) UploadLogo(w http.ResponseWriter, r *http.Request) {
+	idpID := chi.URLParam(r, "id")
+
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":"invalid form data"}`)
+		return
+	}
+
+	record, err := h.store.GetIDP(r.Context(), idpID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprint(w, `{"error":"identity provider not found"}`)
+		return
+	}
+
+	file, header, err := r.FormFile("logo_file")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":"no file provided"}`)
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	allowed := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".svg": true, ".gif": true, ".webp": true, ".ico": true}
+	if !allowed[ext] {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":"unsupported file type"}`)
+		return
+	}
+
+	absUploads, err := filepath.Abs(h.uploadsDir)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"server error"}`)
+		return
+	}
+
+	destName := "idp-logo-" + idpID + ext
+	destPath, err := filepath.Abs(filepath.Join(h.uploadsDir, destName))
+	if err != nil || !strings.HasPrefix(destPath, absUploads+string(filepath.Separator)) {
+		h.logger.Error("computed IDP logo path escapes uploads directory", "idp_id", idpID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"server error"}`)
+		return
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		h.logger.Error("failed to save IDP logo", "path", destPath, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"failed to save file"}`)
+		return
+	}
+	defer func() { _ = out.Close() }()
+
+	if _, err := io.Copy(out, file); err != nil {
+		h.logger.Error("failed to write IDP logo", "path", destPath, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"failed to write file"}`)
+		return
+	}
+
+	// Remove old logo file if it had a different extension.
+	if record.LogoURL != "" && record.LogoURL != "/uploads/"+destName {
+		oldPath, pathErr := filepath.Abs(filepath.Join(h.uploadsDir, filepath.Base(record.LogoURL)))
+		if pathErr == nil && strings.HasPrefix(oldPath, absUploads+string(filepath.Separator)) {
+			_ = os.Remove(oldPath)
+		}
+	}
+
+	logoURL := "/uploads/" + destName
+	record.LogoURL = logoURL
+	if err := h.store.UpdateIDP(r.Context(), record); err != nil {
+		h.logger.Error("failed to update IDP logo URL", "error", err, "idp_id", idpID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, `{"error":"failed to update record"}`)
+		return
+	}
+
+	resp, _ := json.Marshal(map[string]string{"logo_url": logoURL})
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(resp)
 }
 
 // List renders the IDP list page.

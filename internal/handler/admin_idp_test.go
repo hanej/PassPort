@@ -2459,3 +2459,227 @@ func TestIDPHandleLogoUpload_CreateError(t *testing.T) {
 		t.Errorf("expected currentLogoURL %q when os.Create fails, got %q", currentURL, result)
 	}
 }
+
+// buildLogoUploadRequest creates a multipart request containing a logo file.
+func buildLogoUploadRequest(t *testing.T, filename string, content []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("logo_file", filename)
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := fw.Write(content); err != nil {
+		t.Fatalf("writing file content: %v", err)
+	}
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp/test-idp/logo", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req
+}
+
+func TestUploadLogo_Success(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	req := buildLogoUploadRequest(t, "logo.png", []byte("fake-png-data"))
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parsing response JSON: %v", err)
+	}
+	logoURL, ok := resp["logo_url"]
+	if !ok || logoURL == "" {
+		t.Errorf("expected logo_url in response, got: %v", resp)
+	}
+}
+
+func TestUploadLogo_IDPNotFound(t *testing.T) {
+	env := setupIDPTest(t)
+
+	req := buildLogoUploadRequest(t, "logo.png", []byte("data"))
+	req = withChiURLParam(req, "id", "nonexistent-idp")
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown IDP, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadLogo_NoFileProvided(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	// Multipart form without a file field.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("other_field", "value")
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp/"+idpID+"/logo", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing file, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadLogo_InvalidExtension(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	req := buildLogoUploadRequest(t, "logo.exe", []byte("malware"))
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid extension, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadLogo_InvalidMultipart(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	// Not a multipart form at all.
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp/"+idpID+"/logo",
+		strings.NewReader("not multipart"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid multipart, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadLogo_ReplacesOldLogo(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	uploadsDir := env.handler.uploadsDir
+
+	// Pre-create an "old" logo file with a different extension.
+	oldLogo := "idp-logo-" + idpID + ".jpg"
+	oldPath := uploadsDir + "/" + oldLogo
+	if err := os.WriteFile(oldPath, []byte("old jpg"), 0640); err != nil {
+		t.Fatalf("writing old logo: %v", err)
+	}
+	// Set the IDP's current logo URL to the old file.
+	ctx := context.Background()
+	record, _ := env.db.GetIDP(ctx, idpID)
+	record.LogoURL = "/uploads/" + oldLogo
+	_ = env.db.UpdateIDP(ctx, record)
+
+	// Upload a new PNG logo.
+	req := buildLogoUploadRequest(t, "logo.png", []byte("new png data"))
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Old file should have been removed.
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Error("expected old logo to be removed after upload")
+	}
+}
+
+// TestUploadLogo_SaveFailure triggers the os.Create error path by using an
+// invalid uploads directory that does not exist.
+func TestUploadLogo_SaveFailure(t *testing.T) {
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	// Rebuild handler with a non-existent uploads dir so os.Create always fails.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	key, _ := crypto.GenerateKey()
+	cryptoSvc, _ := crypto.NewService(key, 1)
+	tmpFile, _ := os.CreateTemp(t.TempDir(), "audit-*.log")
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(env.db, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	badHandler := NewAdminIDPHandler(
+		env.db, cryptoSvc, env.registry,
+		stubIDPRenderer(t), auditLog, logger,
+		"/nonexistent/uploads/dir/that/cannot/be/created",
+	)
+
+	req := buildLogoUploadRequest(t, "logo.png", []byte("some png data"))
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	badHandler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when os.Create fails, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUploadLogo_UpdateIDPError covers the UpdateIDP error path in UploadLogo.
+func TestUploadLogo_UpdateIDPError(t *testing.T) {
+	database := setupTestDB(t)
+
+	// Create an IDP record in the real DB so GetIDP succeeds.
+	env := setupIDPTest(t)
+	idpID := env.createTestIDP(t)
+
+	// Rebuild with mock store that will fail on UpdateIDP.
+	mock := &mockIDPErrStore{
+		DB:           database,
+		updateIDPErr: fmt.Errorf("DB write failed"),
+	}
+	// The mock needs the IDP that was created in env.db, not in database.
+	// Use getIDPRecord override to return the IDP without touching the DB.
+	idpRec, err := env.db.GetIDP(context.Background(), idpID)
+	if err != nil {
+		t.Fatalf("getting created IDP: %v", err)
+	}
+	mock.getIDPRecord = idpRec
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	key, _ := crypto.GenerateKey()
+	cryptoSvc, _ := crypto.NewService(key, 1)
+	tmpFile, _ := os.CreateTemp(t.TempDir(), "audit-*.log")
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	h := NewAdminIDPHandler(mock, cryptoSvc, env.registry, stubIDPRenderer(t), auditLog, logger, t.TempDir())
+
+	req := buildLogoUploadRequest(t, "logo.png", []byte("png data"))
+	req = withChiURLParam(req, "id", idpID)
+
+	rec := httptest.NewRecorder()
+	h.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when UpdateIDP fails, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}

@@ -532,3 +532,48 @@ func TestNewAdminBrandingHandler_MkdirAllError(t *testing.T) {
 		t.Error("expected non-nil handler even when uploads dir creation fails")
 	}
 }
+
+// TestAdminBrandingSave_LogoCreateError covers the os.Create failure path when
+// a logo file is uploaded but the uploads directory cannot be written to.
+func TestAdminBrandingSave_LogoCreateError(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	tmpAudit, err := os.CreateTemp(t.TempDir(), "audit-*.log")
+	if err != nil {
+		t.Fatalf("creating audit file: %v", err)
+	}
+	_ = tmpAudit.Close()
+	auditLog, err := audit.NewLogger(database, tmpAudit.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	renderer := stubBrandingRenderer(t)
+
+	// Use an invalid (non-existent, non-writable) uploads dir.
+	h := NewAdminBrandingHandler(database, renderer, auditLog, logger,
+		"/nonexistent/branding/uploads")
+
+	// Build a multipart request that includes a logo file.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("logo_file", "logo.png")
+	if err != nil {
+		t.Fatalf("creating form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("fake png")); err != nil {
+		t.Fatalf("writing file: %v", err)
+	}
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/branding", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.Save(rec, req)
+
+	// renderBrandingError renders the form page with the error message.
+	// We don't assert the exact status, just that the handler didn't panic.
+	_ = rec.Code
+}
