@@ -162,7 +162,6 @@ main {
 /* ---- Admin Sidebar ---- */
 
 .admin-sidebar {
-    min-height: calc(100vh - 120px);
     padding-top: 1rem;
 }
 

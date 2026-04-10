@@ -84,7 +84,7 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 		AdminEmailTemplates: NewAdminEmailTemplatesHandler(database, renderer, sm, auditLog, logger),
 		AdminExpiration:     NewAdminExpirationHandler(database, notifier, renderer, auditLog, logger),
 		AdminBranding:       NewAdminBrandingHandler(database, renderer, auditLog, logger, uploadsPath),
-		AdminMigrate:        NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLog, logger),
+		AdminMigrate:        NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLog, logger, uploadsPath),
 		AdminDocs:           NewAdminDocsHandler(renderer, logger, docContent),
 		MFA:                 NewMFAHandler(database, sm, cryptoSvc, registry, renderer, auditLog, logger),
 		Sessions:            sm,

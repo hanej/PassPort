@@ -22,10 +22,11 @@ import (
 
 // Renderer manages template parsing and rendering for the application.
 type Renderer struct {
-	pages    map[string]*template.Template
-	logger   *slog.Logger
-	branding atomic.Pointer[db.BrandingConfig]
-	md       goldmark.Markdown
+	pages      map[string]*template.Template
+	logger     *slog.Logger
+	branding   atomic.Pointer[db.BrandingConfig]
+	appVersion string
+	md         goldmark.Markdown
 }
 
 // PageData holds all data passed to templates for rendering.
@@ -41,10 +42,11 @@ type PageData struct {
 // NewRenderer parses all templates from the embedded filesystem and returns
 // a ready-to-use Renderer. Each page gets its own complete template set
 // (layouts + partials + page) so that block overrides work correctly.
-func NewRenderer(logger *slog.Logger) (*Renderer, error) {
+func NewRenderer(appVersion string, logger *slog.Logger) (*Renderer, error) {
 	r := &Renderer{
-		logger: logger,
-		md:     goldmark.New(goldmark.WithRendererOptions(goldmarkhtml.WithUnsafe())),
+		logger:     logger,
+		appVersion: appVersion,
+		md:         goldmark.New(goldmark.WithRendererOptions(goldmarkhtml.WithUnsafe())),
 	}
 
 	// Set default branding so templates always have a value.
@@ -82,6 +84,9 @@ func NewRenderer(logger *slog.Logger) (*Renderer, error) {
 			return template.HTML(buf.String())
 		},
 		"contains": strings.Contains,
+		"appVersion": func() string {
+			return r.appVersion
+		},
 		// fmtTime formats a time.Time (or *time.Time) in the local system timezone.
 		// Use this in templates instead of bare {{.SomeTime}} or .Format to ensure
 		// times are never shown in UTC. Logs and DB storage remain in UTC.

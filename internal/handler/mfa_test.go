@@ -669,7 +669,7 @@ func TestShowMFA_ResetSession_InvalidEmailAttr_Redirects(t *testing.T) {
 func TestShowMFA_BrandingSetInRenderer(t *testing.T) {
 	// Ensure SetBranding is set to non-nil on a new renderer (covers branding init path).
 	logger := testLogger()
-	r, err := NewRenderer(logger)
+	r, err := NewRenderer("", logger)
 	if err != nil {
 		t.Fatalf("NewRenderer: %v", err)
 	}
