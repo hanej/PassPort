@@ -25,11 +25,12 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Logging  LoggingConfig  `yaml:"logging"`
-	Session  SessionConfig  `yaml:"session"`
-	Audit    AuditConfig    `yaml:"audit"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	Logging    LoggingConfig    `yaml:"logging"`
+	Session    SessionConfig    `yaml:"session"`
+	Audit      AuditConfig      `yaml:"audit"`
+	LocalAdmin LocalAdminConfig `yaml:"local_admin"`
 }
 
 type ServerConfig struct {
@@ -77,10 +78,34 @@ type AuditConfig struct {
 	PurgeFreq time.Duration `yaml:"purge_freq"`
 }
 
+// LocalAdminConfig controls the local admin password policy.
+type LocalAdminConfig struct {
+	// PasswordHistory is how many previous password hashes to retain.
+	// Users cannot reuse any of the last N passwords. Default: 14.
+	PasswordHistory int `yaml:"password_history"`
+
+	// MinLength is the minimum password length. Default: 12.
+	MinLength int `yaml:"min_length"`
+
+	// RequireUppercase enforces at least one uppercase letter. Default: true.
+	RequireUppercase bool `yaml:"require_uppercase"`
+
+	// RequireLowercase enforces at least one lowercase letter. Default: true.
+	RequireLowercase bool `yaml:"require_lowercase"`
+
+	// RequireDigit enforces at least one digit. Default: true.
+	RequireDigit bool `yaml:"require_digit"`
+
+	// RequireSpecial enforces at least one special character. Default: true.
+	RequireSpecial bool `yaml:"require_special"`
+}
+
 func Defaults() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:         ":8080",
+			Addr:         ":8443",
+			TLSCert:      "/etc/passport/tls/cert.pem",
+			TLSKey:       "/etc/passport/tls/key.pem",
 			DrainTimeout: 15 * time.Second,
 		},
 		Database: DatabaseConfig{
@@ -105,6 +130,14 @@ func Defaults() Config {
 			FilePath:    "audit.log",
 			DBRetention: 720 * time.Hour, // 30 days
 			PurgeFreq:   1 * time.Hour,
+		},
+		LocalAdmin: LocalAdminConfig{
+			PasswordHistory:  14,
+			MinLength:        12,
+			RequireUppercase: true,
+			RequireLowercase: true,
+			RequireDigit:     true,
+			RequireSpecial:   true,
 		},
 	}
 }
@@ -146,16 +179,19 @@ func defaultConfigYAML() string {
 # Startup configuration. All other settings are managed via the Admin UI.
 
 server:
-  # Address to listen on (e.g., ":8080", "0.0.0.0:8443")
-  addr: ":8080"
+  # Address to listen on
+  addr: ":8443"
 
-  # TLS certificate and key paths (optional; omit for plain HTTP)
-  # tls_cert: /etc/passport/tls/cert.pem
-  # tls_key: /etc/passport/tls/key.pem
+  # TLS certificate and key paths.
+  # A self-signed certificate is generated at install time by the postinstall script.
+  # Replace with a CA-signed certificate for production use.
+  tls_cert: /etc/passport/tls/cert.pem
+  tls_key: /etc/passport/tls/key.pem
 
   # Set to true if running behind a reverse proxy that terminates TLS.
   # This trusts X-Forwarded-Proto to determine if the connection is secure,
   # and sets the Secure flag on cookies accordingly.
+  # Leave false when PassPort terminates TLS directly (the default).
   trust_proxy: false
 
   # Time to wait for in-flight requests to complete on shutdown
@@ -195,6 +231,25 @@ audit:
 
   # How often the DB audit purge runs
   purge_freq: 1h
+
+local_admin:
+  # How many previous password hashes to retain for reuse prevention.
+  password_history: 14
+
+  # Minimum password length.
+  min_length: 12
+
+  # Require at least one uppercase letter.
+  require_uppercase: true
+
+  # Require at least one lowercase letter.
+  require_lowercase: true
+
+  # Require at least one digit.
+  require_digit: true
+
+  # Require at least one special character.
+  require_special: true
 `
 }
 
@@ -254,6 +309,14 @@ func (c *Config) validate() error {
 
 	if c.Audit.DBRetention > 0 && c.Audit.PurgeFreq <= 0 {
 		return fmt.Errorf("audit.purge_freq must be positive when db_retention is set")
+	}
+
+	if c.LocalAdmin.MinLength < 1 {
+		return fmt.Errorf("local_admin.min_length must be at least 1")
+	}
+
+	if c.LocalAdmin.PasswordHistory < 0 {
+		return fmt.Errorf("local_admin.password_history must be non-negative")
 	}
 
 	return nil

@@ -185,6 +185,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 						r.Get("/idp/{id}/browse-page", cfg.AdminIDP.BrowsePage)
 						r.Get("/idp/{id}/edit", cfg.AdminIDP.ShowEdit)
 						r.Post("/idp/{id}", cfg.AdminIDP.Update)
+						r.Post("/idp/{id}/logo", cfg.AdminIDP.UploadLogo)
 						r.Post("/idp/{id}/delete", cfg.AdminIDP.Delete)
 						r.Post("/idp/{id}/test", cfg.AdminIDP.TestConnection)
 						r.Post("/idp/{id}/toggle", cfg.AdminIDP.Toggle)

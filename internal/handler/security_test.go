@@ -340,32 +340,29 @@ func TestSession_ReuseAfterLogout(t *testing.T) {
 	}
 }
 
-// TestSession_FlashTypeRejectedByDB verifies that the DB schema CHECK constraint
-// prevents creation of any session with a user_type outside the allowed set.
-// This is the actual protection against session-type confusion —  "flash" sessions
-// cannot be stored and therefore cannot be used to access protected routes.
-func TestSession_FlashTypeRejectedByDB(t *testing.T) {
+// TestSession_FlashTypeAllowedByDB verifies that the DB schema accepts 'flash' as a
+// valid session user_type so that the forgot-password success flash message can be stored.
+func TestSession_FlashTypeAllowedByDB(t *testing.T) {
 	database := setupTestDB(t)
 	sm := auth.NewSessionManager(database, 30*time.Minute, false, testLogger())
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	_, err := sm.CreateSession(w, r, "flash", "", "", false, false)
-	if err == nil {
-		t.Error("expected DB constraint error when creating 'flash' session type, got nil")
+	if err != nil {
+		t.Errorf("expected 'flash' session type to be accepted by DB, got: %v", err)
 	}
 }
 
 // TestSession_FlashCannotAccessDashboard documents the defence-in-depth provided
-// by the RequireNonResetSession middleware fix (Bug 2). Even if future schema
-// changes allowed "flash" user_type, the middleware would block dashboard access.
-// This test uses a "reset" session to exercise the same code path.
+// by the RequireNonResetSession middleware. Even though 'flash' sessions can now be
+// stored in the DB, they cannot access the dashboard.
 func TestSession_FlashCannotAccessDashboard(t *testing.T) {
 	database := setupTestDB(t)
 	sm := auth.NewSessionManager(database, 30*time.Minute, false, testLogger())
 
 	// Use a "reset" session to verify the middleware blocks non-app session types.
-	// ("flash" cannot be created due to DB schema constraint — see TestSession_FlashTypeRejectedByDB.)
+	// 'flash' sessions are valid but are also blocked by RequireNonResetSession.
 	cookies, _ := createSessionForTest(t, sm, database, "reset", "user", false, false)
 
 	r := chi.NewRouter()

@@ -19,7 +19,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	_ "embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -38,7 +37,6 @@ import (
 	"github.com/hanej/passport/internal/idp/correlation"
 	"github.com/hanej/passport/internal/job"
 	"github.com/hanej/passport/internal/logging"
-	"github.com/hanej/passport/internal/migrate"
 	"github.com/hanej/passport/internal/ratelimit"
 	"github.com/hanej/passport/internal/server"
 )
@@ -112,6 +110,8 @@ func main() {
 	exportPath := flag.String("export", "", "export configuration to file and exit (secrets decrypted)")
 	backupPath := flag.String("backup", "", "backup configuration to file and exit (secrets stay encrypted)")
 	importPath := flag.String("import", "", "import configuration from file and exit")
+	resetAdminPassword := flag.String("reset-admin-password", "", "reset a local admin password and force change at next login (usage: -reset-admin-password <username>)")
+	forcePasswordChange := flag.String("force-password-change", "", "force a local admin to change their password at next login (usage: -force-password-change <username>)")
 	flag.Parse()
 
 	if *showVersion {
@@ -198,53 +198,23 @@ func main() {
 
 	// Handle CLI export/backup/import modes — these exit without starting the server.
 	if *exportPath != "" {
-		data, err := migrate.BuildExport(ctx, database, cryptoSvc)
-		if err != nil {
+		if err := runExport(ctx, database, cryptoSvc, *exportPath); err != nil {
 			logger.Error("export failed", "error", err)
-			os.Exit(1)
-		}
-		jsonBytes, err := json.MarshalIndent(data, "", "  ")
-		if err != nil {
-			logger.Error("failed to marshal export JSON", "error", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(*exportPath, jsonBytes, 0600); err != nil {
-			logger.Error("failed to write export file", "error", err, "path", *exportPath)
 			os.Exit(1)
 		}
 		logger.Info("configuration exported", "path", *exportPath)
 		os.Exit(0)
 	}
 	if *backupPath != "" {
-		data, err := migrate.BuildBackup(ctx, database)
-		if err != nil {
+		if err := runBackup(ctx, database, *backupPath); err != nil {
 			logger.Error("backup failed", "error", err)
-			os.Exit(1)
-		}
-		jsonBytes, err := json.MarshalIndent(data, "", "  ")
-		if err != nil {
-			logger.Error("failed to marshal backup JSON", "error", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(*backupPath, jsonBytes, 0600); err != nil {
-			logger.Error("failed to write backup file", "error", err, "path", *backupPath)
 			os.Exit(1)
 		}
 		logger.Info("configuration backed up", "path", *backupPath)
 		os.Exit(0)
 	}
 	if *importPath != "" {
-		fileBytes, err := os.ReadFile(*importPath)
-		if err != nil {
-			logger.Error("failed to read import file", "error", err, "path", *importPath)
-			os.Exit(1)
-		}
-		var data migrate.ExportData
-		if err := json.Unmarshal(fileBytes, &data); err != nil {
-			logger.Error("failed to parse import file", "error", err)
-			os.Exit(1)
-		}
-		result, err := migrate.RunImport(ctx, database, cryptoSvc, &data, migrate.AllSections())
+		result, err := runImport(ctx, database, cryptoSvc, *importPath)
 		if err != nil {
 			logger.Error("import failed", "error", err)
 			os.Exit(1)
@@ -269,7 +239,33 @@ func main() {
 	}
 
 	// Bootstrap local admin
-	generatedPassword, err := auth.Bootstrap(ctx, database, logger)
+	policy := auth.PasswordPolicy{
+		MinLength:        cfg.LocalAdmin.MinLength,
+		RequireUppercase: cfg.LocalAdmin.RequireUppercase,
+		RequireLowercase: cfg.LocalAdmin.RequireLowercase,
+		RequireDigit:     cfg.LocalAdmin.RequireDigit,
+		RequireSpecial:   cfg.LocalAdmin.RequireSpecial,
+		HistoryLen:       cfg.LocalAdmin.PasswordHistory,
+	}
+
+	// Handle admin management CLI commands — these open the DB, act, then exit.
+	if *resetAdminPassword != "" {
+		_, err := runResetAdminPassword(ctx, database, *resetAdminPassword, policy.HistoryLen, os.Stdout, logger)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if *forcePasswordChange != "" {
+		if err := runForcePasswordChange(ctx, database, *forcePasswordChange, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	generatedPassword, err := auth.Bootstrap(ctx, database, policy.HistoryLen, logger)
 	if err != nil {
 		logger.Error("failed to bootstrap local admin", "error", err)
 		os.Exit(1)
@@ -307,7 +303,7 @@ func main() {
 	correlator := &correlatorAdapter{engine: correlationEngine}
 
 	// Initialize template renderer
-	renderer, err := handler.NewRenderer(logger)
+	renderer, err := handler.NewRenderer(version, logger)
 	if err != nil {
 		logger.Error("failed to create renderer", "error", err)
 		os.Exit(1)
@@ -328,7 +324,7 @@ func main() {
 	loginHandler := handler.NewLoginHandler(database, sessions, registry, correlator, cryptoSvc, renderer, auditLogger, logger)
 	dashboardHandler := handler.NewDashboardHandler(database, sessions, registry, correlator, renderer, auditLogger, logger)
 	linkHandler := handler.NewLinkHandler(database, sessions, registry, renderer, auditLogger, logger)
-	bootstrapHandler := handler.NewBootstrapHandler(database, sessions, renderer, auditLogger, logger)
+	bootstrapHandler := handler.NewBootstrapHandler(database, sessions, renderer, auditLogger, policy, logger)
 	uploadsDir := filepath.Join(filepath.Dir(cfg.Database.Path), "uploads")
 	adminIDPHandler := handler.NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLogger, logger, uploadsDir)
 	// Load all enabled IDPs into the live registry.
@@ -354,7 +350,7 @@ func main() {
 	adminMappingsHandler := handler.NewAdminMappingsHandler(database, registry, renderer, auditLogger, logger)
 	adminAuditHandler := handler.NewAdminAuditHandler(database, renderer, logger)
 	adminBrandingHandler := handler.NewAdminBrandingHandler(database, renderer, auditLogger, logger, uploadsDir)
-	adminMigrateHandler := handler.NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLogger, logger)
+	adminMigrateHandler := handler.NewAdminMigrateHandler(database, cryptoSvc, renderer, auditLogger, logger, uploadsDir)
 	adminDocsHandler := handler.NewAdminDocsHandler(renderer, logger, docs.GuideMarkdown)
 	adminReportsHandler := handler.NewAdminReportsHandler(database, reportScheduler, renderer, auditLogger, logger)
 
