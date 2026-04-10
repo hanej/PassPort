@@ -75,11 +75,13 @@ scripts:
   postinstall: deploy/scripts/postinstall.sh
   preremove:   deploy/scripts/preremove.sh
 
+# Prevent RPM from rewriting the binary's shebang / stripping
+rpm:
+  compression: xz
+
 overrides:
   rpm:
     scripts:
       preinstall:  deploy/scripts/preinstall.sh
       postinstall: deploy/scripts/postinstall.sh
       preremove:   deploy/scripts/preremove.sh
-    # Prevent RPM from rewriting the binary's shebang / stripping
-    compression: xz
