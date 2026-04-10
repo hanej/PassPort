@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/crypto"
@@ -75,9 +73,8 @@ func (h *LoginHandler) ShowLogin(w http.ResponseWriter, r *http.Request) {
 	flash := h.sessions.GetFlash(r)
 
 	h.renderer.Render(w, r, "login.html", PageData{
-		Title:     "Login",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     flash,
+		Title: "Login",
+		Flash: flash,
 		Data: map[string]any{
 			"IDPs": idps,
 		},
@@ -458,9 +455,8 @@ func (h *LoginHandler) renderLoginError(w http.ResponseWriter, r *http.Request, 
 	}
 
 	h.renderer.Render(w, r, "login.html", PageData{
-		Title:     "Login",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "error", "message": message},
+		Title: "Login",
+		Flash: map[string]string{"category": "error", "message": message},
 		Data: map[string]any{
 			"IDPs": idps,
 		},

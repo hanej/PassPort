@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gorilla/csrf"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
@@ -49,9 +48,8 @@ func (h *AdminDocsHandler) Show(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 
 	h.renderer.Render(w, r, "admin_docs.html", PageData{
-		Title:     "Documentation",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Documentation",
+		Session: sess,
 		Data: map[string]any{
 			"Content":    h.renderedDoc,
 			"ActivePage": "docs",

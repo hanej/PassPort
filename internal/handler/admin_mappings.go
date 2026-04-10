@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -61,9 +60,8 @@ func (h *AdminMappingsHandler) Show(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_mappings.html", PageData{
-		Title:     "User Mappings",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "User Mappings",
+		Session: sess,
 		Data: map[string]any{
 			"IDPs":       idps,
 			"ActivePage": "mappings",
@@ -166,9 +164,8 @@ func (h *AdminMappingsHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_mappings.html", PageData{
-		Title:     "User Mappings",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "User Mappings",
+		Session: sess,
 		Data: map[string]any{
 			"IDPs":           idps,
 			"Mappings":       mappings,

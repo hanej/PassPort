@@ -9,11 +9,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
-
-	csrf "filippo.io/csrf/gorilla"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -102,9 +101,8 @@ func (h *AdminSMTPHandler) Show(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.renderer.Render(w, r, "admin_smtp.html", PageData{
-		Title:     "SMTP Configuration",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "SMTP Configuration",
+		Session: sess,
 		Data: map[string]any{
 			"Config":     configFields,
 			"Secrets":    secrets,
@@ -171,10 +169,9 @@ func (h *AdminSMTPHandler) Save(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.SaveSMTPConfig(r.Context(), cfg); err != nil {
 		h.logger.Error("failed to save SMTP config", "error", err)
 		h.renderer.Render(w, r, "admin_smtp.html", PageData{
-			Title:     "SMTP Configuration",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to save SMTP configuration"},
+			Title:   "SMTP Configuration",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to save SMTP configuration"},
 			Data: map[string]any{
 				"Config":  configFields,
 				"Secrets": secrets,
@@ -198,10 +195,9 @@ func (h *AdminSMTPHandler) Save(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.renderer.Render(w, r, "admin_smtp.html", PageData{
-		Title:     "SMTP Configuration",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "success", "message": "SMTP configuration saved successfully"},
+		Title:   "SMTP Configuration",
+		Session: sess,
+		Flash:   map[string]string{"category": "success", "message": "SMTP configuration saved successfully"},
 		Data: map[string]any{
 			"Config":  configFields,
 			"Secrets": secrets,
@@ -216,14 +212,15 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 
 	sess := auth.SessionFromContext(r.Context())
 
-	toAddr := r.FormValue("to")
-	if toAddr == "" || !strings.Contains(toAddr, "@") {
+	parsedTo, err := mail.ParseAddress(r.FormValue("to"))
+	if err != nil {
 		h.renderer.JSON(w, http.StatusBadRequest, map[string]string{
 			"status":  "error",
 			"message": "A valid recipient email address is required",
 		})
 		return
 	}
+	toAddr := parsedTo.Address
 
 	cfg, err := h.store.GetSMTPConfig(r.Context())
 	if err != nil || cfg == nil {

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
@@ -60,9 +58,8 @@ func (h *ForgotPasswordHandler) ShowForm(w http.ResponseWriter, r *http.Request)
 	flash := h.sessions.GetFlash(r)
 
 	h.renderer.Render(w, r, "forgot_password.html", PageData{
-		Title:     "Forgot Password",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     flash,
+		Title: "Forgot Password",
+		Flash: flash,
 		Data: map[string]any{
 			"IDPs": idps,
 		},
@@ -192,9 +189,8 @@ func (h *ForgotPasswordHandler) ShowReset(w http.ResponseWriter, r *http.Request
 	flash := h.sessions.GetFlash(r)
 
 	h.renderer.Render(w, r, "reset_password.html", PageData{
-		Title:     "Reset Password",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     flash,
+		Title: "Reset Password",
+		Flash: flash,
 		Data: map[string]any{
 			"Username":       sess.Username,
 			"IDPName":        idpName,
@@ -379,9 +375,8 @@ func (h *ForgotPasswordHandler) renderFormError(w http.ResponseWriter, r *http.R
 	}
 
 	h.renderer.Render(w, r, "forgot_password.html", PageData{
-		Title:     "Forgot Password",
-		CSRFField: csrf.TemplateField(r),
-		Flash:     map[string]string{"category": "error", "message": message},
+		Title: "Forgot Password",
+		Flash: map[string]string{"category": "error", "message": message},
 		Data: map[string]any{
 			"IDPs": idps,
 		},

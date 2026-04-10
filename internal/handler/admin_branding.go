@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
@@ -60,9 +58,8 @@ func (h *AdminBrandingHandler) Show(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "admin_branding.html", PageData{
-		Title:     "Branding",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Branding",
+		Session: sess,
 		Data: map[string]any{
 			"Config":     cfg,
 			"ActivePage": "branding",
@@ -179,10 +176,9 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("branding config saved", "admin", sess.Username, "title", cfg.AppTitle, "logo", cfg.LogoURL)
 
 	h.renderer.Render(w, r, "admin_branding.html", PageData{
-		Title:     "Branding",
-		Session:   sess,
-		Flash:     map[string]string{"category": "success", "message": "Branding configuration saved successfully."},
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Branding",
+		Session: sess,
+		Flash:   map[string]string{"category": "success", "message": "Branding configuration saved successfully."},
 		Data: map[string]any{
 			"Config":     cfg,
 			"ActivePage": "branding",
@@ -196,10 +192,9 @@ var validHexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 func (h *AdminBrandingHandler) renderBrandingError(w http.ResponseWriter, r *http.Request, sess *db.Session, msg string) {
 	cfg, _ := h.store.GetBrandingConfig(r.Context())
 	h.renderer.Render(w, r, "admin_branding.html", PageData{
-		Title:     "Branding",
-		Session:   sess,
-		Flash:     map[string]string{"category": "error", "message": msg},
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Branding",
+		Session: sess,
+		Flash:   map[string]string{"category": "error", "message": msg},
 		Data: map[string]any{
 			"Config":     cfg,
 			"ActivePage": "branding",

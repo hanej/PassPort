@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -183,9 +182,8 @@ func (h *AdminEmailTemplatesHandler) List(w http.ResponseWriter, r *http.Request
 	h.logger.Debug("email templates loaded", "count", len(rows))
 
 	h.renderer.Render(w, r, "admin_email_templates.html", PageData{
-		Title:     "Email Templates",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Email Templates",
+		Session: sess,
 		Data: map[string]any{
 			"Templates":  rows,
 			"ActivePage": "email_templates",
@@ -250,9 +248,8 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 	)
 
 	h.renderer.Render(w, r, "admin_email_template_form.html", PageData{
-		Title:     "Edit " + friendlyName,
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Edit " + friendlyName,
+		Session: sess,
 		Data: map[string]any{
 			"Template":     tmpl,
 			"Variables":    vars,

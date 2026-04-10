@@ -16,10 +16,10 @@ THIRD-PARTY LICENSES
    Copyright: go-ldap contributors
    https://github.com/go-ldap/ldap
 
-3. csrf (github.com/gorilla/csrf)
+3. csrf (filippo.io/csrf)
    License: BSD 3-Clause
-   Copyright: gorilla/csrf contributors
-   https://github.com/gorilla/csrf
+   Copyright: Filippo Valsorda
+   https://github.com/FiloSottile/csrf
 
 4. goldmark (github.com/yuin/goldmark)
    License: MIT

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
 )
@@ -84,9 +82,8 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	baseURL += q.Encode()
 
 	h.renderer.Render(w, r, "admin_audit.html", PageData{
-		Title:     "Audit Log",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Audit Log",
+		Session: sess,
 		Data: map[string]any{
 			"Entries":     entries,
 			"CurrentPage": page,

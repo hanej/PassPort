@@ -164,7 +164,7 @@ When running behind nginx, Caddy, or similar, set `trust_proxy: true` in `config
 | Database | SQLite (modernc.org/sqlite, pure Go) |
 | LDAP | go-ldap/ldap/v3 |
 | MFA | Duo Universal Prompt SDK |
-| CSRF | gorilla/csrf |
+| CSRF | filippo.io/csrf |
 | Cron | robfig/cron/v3 |
 | Templates | Go html/template + embed.FS |
 

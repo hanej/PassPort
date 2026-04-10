@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"time"
 
+	csrf "filippo.io/csrf/gorilla"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/ratelimit"
@@ -89,22 +89,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	r.Get("/readyz", cfg.Health.Readiness)
 
 	// All remaining routes use CSRF protection.
-	csrfMiddleware := csrf.Protect(
-		cfg.CSRFKey,
-		csrf.Secure(cfg.SecureCookie),
-		csrf.Path("/"),
-	)
+	csrfMiddleware := csrf.Protect(cfg.CSRFKey)
 
 	r.Group(func(r chi.Router) {
-		// When running without TLS, mark requests as plaintext so gorilla/csrf
-		// skips strict Referer checking (which only applies to HTTPS).
-		if !cfg.SecureCookie {
-			r.Use(func(next http.Handler) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					next.ServeHTTP(w, csrf.PlaintextHTTPRequest(r))
-				})
-			})
-		}
 		r.Use(csrfMiddleware)
 
 		// Public routes

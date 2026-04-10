@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/csrf"
-
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
@@ -45,9 +43,8 @@ func (h *BootstrapHandler) ShowChangePassword(w http.ResponseWriter, r *http.Req
 
 	sess := auth.SessionFromContext(r.Context())
 	h.renderer.Render(w, r, "force_password_change.html", PageData{
-		Title:     "Change Password",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Change Password",
+		Session: sess,
 	})
 }
 
@@ -65,20 +62,18 @@ func (h *BootstrapHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 
 	if newPassword == "" {
 		h.renderer.Render(w, r, "force_password_change.html", PageData{
-			Title:     "Change Password",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Password cannot be empty"},
+			Title:   "Change Password",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Password cannot be empty"},
 		})
 		return
 	}
 
 	if newPassword != confirmPassword {
 		h.renderer.Render(w, r, "force_password_change.html", PageData{
-			Title:     "Change Password",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Passwords do not match"},
+			Title:   "Change Password",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Passwords do not match"},
 		})
 		return
 	}

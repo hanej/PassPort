@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -71,9 +70,8 @@ func (h *AdminGroupsHandler) List(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.renderer.Render(w, r, "admin_groups.html", PageData{
-		Title:     "Admin Groups",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
+		Title:   "Admin Groups",
+		Session: sess,
 		Data: map[string]any{
 			"Groups":     groups,
 			"IDPs":       idps,
@@ -107,10 +105,9 @@ func (h *AdminGroupsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		idps, _ := h.store.ListIDPs(r.Context())
 
 		h.renderer.Render(w, r, "admin_groups.html", PageData{
-			Title:     "Admin Groups",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "IDP and Group DN are required"},
+			Title:   "Admin Groups",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "IDP and Group DN are required"},
 			Data: map[string]any{
 				"Groups": groups,
 				"IDPs":   idps,
@@ -131,10 +128,9 @@ func (h *AdminGroupsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		idps, _ := h.store.ListIDPs(r.Context())
 
 		h.renderer.Render(w, r, "admin_groups.html", PageData{
-			Title:     "Admin Groups",
-			Session:   sess,
-			CSRFField: csrf.TemplateField(r),
-			Flash:     map[string]string{"category": "error", "message": "Failed to create admin group: " + err.Error()},
+			Title:   "Admin Groups",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Failed to create admin group: " + err.Error()},
 			Data: map[string]any{
 				"Groups": groups,
 				"IDPs":   idps,

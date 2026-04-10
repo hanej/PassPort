@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	csrf "filippo.io/csrf/gorilla"
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
@@ -30,21 +30,14 @@ import (
 // testCSRFKey is a fixed 32-byte zero key for CSRF tests only.
 var testCSRFKey = make([]byte, 32)
 
-// buildCSRFRouter returns a minimal chi router with gorilla/csrf protection.
-// GET /token sets the X-CSRF-Token response header.
+// buildCSRFRouter returns a minimal chi router with CSRF protection.
+// GET /token is a safe endpoint (never blocked).
 // POST /submit is the state-changing endpoint CSRF guards.
 func buildCSRFRouter() http.Handler {
 	r := chi.NewRouter()
-	csrfMiddleware := csrf.Protect(testCSRFKey, csrf.Secure(false), csrf.Path("/"))
-	// Mark requests as plaintext so gorilla/csrf skips strict HTTPS Referer check.
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, csrf.PlaintextHTTPRequest(r))
-		})
-	})
+	csrfMiddleware := csrf.Protect(testCSRFKey)
 	r.Use(csrfMiddleware)
 	r.Get("/token", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-CSRF-Token", csrf.Token(r))
 		w.WriteHeader(http.StatusOK)
 	})
 	r.Post("/submit", func(w http.ResponseWriter, r *http.Request) {
@@ -53,32 +46,11 @@ func buildCSRFRouter() http.Handler {
 	return r
 }
 
-// getCSRFTokenAndCookies performs a GET request and returns the CSRF token plus
-// all response cookies (including the gorilla CSRF cookie required for validation).
-func getCSRFTokenAndCookies(t *testing.T, router http.Handler, path string) (string, []*http.Cookie) {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("getCSRFToken: expected 200, got %d", rec.Code)
-	}
-	token := rec.Header().Get("X-CSRF-Token")
-	if token == "" {
-		t.Fatal("getCSRFToken: no X-CSRF-Token in response")
-	}
-	return token, rec.Result().Cookies()
-}
-
-// doPostWithCookies submits a POST with the given form values, CSRF token, and cookies.
-func doPostWithCookies(router http.Handler, path string, form url.Values, csrfToken string, cookies []*http.Cookie) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if csrfToken != "" {
-		req.Header.Set("X-CSRF-Token", csrfToken)
-	}
-	for _, c := range cookies {
-		req.AddCookie(c)
+// doPost submits a POST to the given path with optional header overrides.
+func doPost(router http.Handler, path string, headers map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -109,70 +81,62 @@ func createSessionForTest(t *testing.T, sm *auth.SessionManager, database *db.DB
 // CSRF protection tests
 // ---------------------------------------------------------------------------
 
-// TestCSRF_MissingToken verifies that a POST without an X-CSRF-Token header is
-// rejected with HTTP 403, protecting against cross-site request forgery.
-func TestCSRF_MissingToken(t *testing.T) {
+// TestCSRF_SameOriginPostAllowed verifies that a same-origin POST (carrying
+// Sec-Fetch-Site: same-origin) is allowed through the CSRF middleware.
+func TestCSRF_SameOriginPostAllowed(t *testing.T) {
 	router := buildCSRFRouter()
-
-	// First make a GET to seed the CSRF cookie — gorilla/csrf requires the cookie
-	// to be present even to reject an invalid request.
-	_, cookies := getCSRFTokenAndCookies(t, router, "/token")
-
-	// POST with the CSRF cookie but NO token header or body field.
-	rec := doPostWithCookies(router, "/submit", url.Values{}, "", cookies)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for missing CSRF token, got %d", rec.Code)
-	}
-}
-
-// TestCSRF_WrongToken verifies that a forged or mismatched CSRF token is
-// rejected with HTTP 403.
-func TestCSRF_WrongToken(t *testing.T) {
-	router := buildCSRFRouter()
-	_, cookies := getCSRFTokenAndCookies(t, router, "/token")
-
-	// Use a plausible-looking but wrong token value.
-	wrongToken := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	rec := doPostWithCookies(router, "/submit", url.Values{}, wrongToken, cookies)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for wrong CSRF token, got %d", rec.Code)
-	}
-}
-
-// TestCSRF_ValidToken verifies that a POST carrying the correct CSRF token and
-// cookie passes through the middleware (reaching the handler).
-func TestCSRF_ValidToken(t *testing.T) {
-	router := buildCSRFRouter()
-	token, cookies := getCSRFTokenAndCookies(t, router, "/token")
-
-	rec := doPostWithCookies(router, "/submit", url.Values{}, token, cookies)
+	rec := doPost(router, "/submit", map[string]string{
+		"Sec-Fetch-Site": "same-origin",
+	})
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for valid CSRF token, got %d", rec.Code)
+		t.Errorf("expected 200 for same-origin POST, got %d", rec.Code)
+	}
+}
+
+// TestCSRF_CrossSitePostBlocked verifies that a cross-site POST (Sec-Fetch-Site:
+// cross-site) is rejected with HTTP 403, the primary CSRF attack vector.
+func TestCSRF_CrossSitePostBlocked(t *testing.T) {
+	router := buildCSRFRouter()
+	rec := doPost(router, "/submit", map[string]string{
+		"Sec-Fetch-Site": "cross-site",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for cross-site POST, got %d", rec.Code)
+	}
+}
+
+// TestCSRF_ForeignOriginHeaderBlocked verifies that a POST whose Origin header
+// does not match the request host is rejected with HTTP 403.
+func TestCSRF_ForeignOriginHeaderBlocked(t *testing.T) {
+	router := buildCSRFRouter()
+	rec := doPost(router, "http://example.com/submit", map[string]string{
+		"Origin": "https://attacker.com",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for mismatched Origin header, got %d", rec.Code)
 	}
 }
 
 // TestCSRF_GetNeverBlocked confirms that GET requests are never blocked by CSRF
-// middleware, regardless of token presence.
+// middleware — GET is a safe method regardless of headers.
 func TestCSRF_GetNeverBlocked(t *testing.T) {
 	router := buildCSRFRouter()
 	req := httptest.NewRequest(http.MethodGet, "/token", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for GET without CSRF token, got %d", rec.Code)
+		t.Errorf("expected 200 for GET without CSRF headers, got %d", rec.Code)
 	}
 }
 
-// TestCSRF_NoCookieBlocksPost verifies that a POST even with a token but
-// without the CSRF cookie is rejected — prevents token-only replay attacks.
-func TestCSRF_NoCookieBlocksPost(t *testing.T) {
+// TestCSRF_NonBrowserClientAllowed verifies that a POST with no Sec-Fetch-Site
+// and no Origin header is allowed — non-browser API clients are not subject to
+// CSRF, which is fundamentally a browser-initiated attack.
+func TestCSRF_NonBrowserClientAllowed(t *testing.T) {
 	router := buildCSRFRouter()
-	// Get token (and cookies) from a GET.
-	token, _ := getCSRFTokenAndCookies(t, router, "/token")
-	// POST with the token but without the CSRF cookie.
-	rec := doPostWithCookies(router, "/submit", url.Values{}, token, nil)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for POST with token but no CSRF cookie, got %d", rec.Code)
+	rec := doPost(router, "/submit", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for non-browser POST (no Sec-Fetch-Site/Origin), got %d", rec.Code)
 	}
 }
 

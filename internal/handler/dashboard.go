@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -177,11 +176,9 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 	flash := h.sessions.GetFlash(r)
 
 	h.renderer.Render(w, r, "dashboard.html", PageData{
-		Title:     "Dashboard",
-		Session:   sess,
-		CSRFField: csrf.TemplateField(r),
-		CSRFToken: csrf.Token(r),
-		Flash:     flash,
+		Title:   "Dashboard",
+		Session: sess,
+		Flash:   flash,
 		Data: map[string]any{
 			"Panels":      panels,
 			"ProviderID":  sess.ProviderID,
