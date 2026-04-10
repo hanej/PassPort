@@ -16,6 +16,7 @@ type BootstrapHandler struct {
 	sessions *auth.SessionManager
 	renderer *Renderer
 	audit    *audit.Logger
+	policy   auth.PasswordPolicy
 	logger   *slog.Logger
 }
 
@@ -25,6 +26,7 @@ func NewBootstrapHandler(
 	sessions *auth.SessionManager,
 	renderer *Renderer,
 	auditLogger *audit.Logger,
+	policy auth.PasswordPolicy,
 	logger *slog.Logger,
 ) *BootstrapHandler {
 	return &BootstrapHandler{
@@ -32,6 +34,7 @@ func NewBootstrapHandler(
 		sessions: sessions,
 		renderer: renderer,
 		audit:    auditLogger,
+		policy:   policy,
 		logger:   logger,
 	}
 }
@@ -78,6 +81,34 @@ func (h *BootstrapHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Enforce password complexity policy.
+	if err := auth.ValidatePasswordPolicy(newPassword, h.policy); err != nil {
+		h.renderer.Render(w, r, "force_password_change.html", PageData{
+			Title:   "Change Password",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": err.Error()},
+		})
+		return
+	}
+
+	// Enforce password history (prevent reuse).
+	if h.policy.HistoryLen > 0 {
+		hashes, err := h.store.GetPasswordHistory(r.Context(), sess.Username)
+		if err != nil {
+			h.logger.Error("failed to fetch password history", "error", err)
+			h.renderer.RenderError(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if err := auth.CheckPasswordHistory(newPassword, hashes); err != nil {
+			h.renderer.Render(w, r, "force_password_change.html", PageData{
+				Title:   "Change Password",
+				Session: sess,
+				Flash:   map[string]string{"category": "error", "message": err.Error()},
+			})
+			return
+		}
+	}
+
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
 		h.logger.Error("failed to hash password", "error", err)
@@ -89,6 +120,11 @@ func (h *BootstrapHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 		h.logger.Error("failed to update admin password", "error", err)
 		h.renderer.RenderError(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// Record new hash in history.
+	if err := h.store.AddPasswordHistory(r.Context(), sess.Username, hash, h.policy.HistoryLen); err != nil {
+		h.logger.Warn("failed to record password history", "error", err)
 	}
 
 	// Clear the must_change_password flag on the session.

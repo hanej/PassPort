@@ -62,7 +62,7 @@ func setupBootstrapTest(t *testing.T) *bootstrapTestEnv {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewBootstrapHandler(database, sm, renderer, auditLog, logger)
+	h := NewBootstrapHandler(database, sm, renderer, auditLog, auth.PasswordPolicy{}, logger)
 
 	return &bootstrapTestEnv{
 		db:       database,
@@ -277,6 +277,71 @@ func (m *mockBootstrapAdminStore) UpdateLocalAdminPassword(ctx context.Context, 
 	return m.DB.UpdateLocalAdminPassword(ctx, username, passwordHash, mustChange)
 }
 
+// TestChangePassword_PolicyViolation covers the ValidatePasswordPolicy failure path.
+func TestChangePassword_PolicyViolation(t *testing.T) {
+	database := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	renderer := stubRenderer(t)
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
+	if err != nil {
+		t.Fatalf("creating temp audit file: %v", err)
+	}
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	// Policy requires at least 100 characters — any real password will fail.
+	policy := auth.PasswordPolicy{MinLength: 100}
+	h := NewBootstrapHandler(database, sm, renderer, auditLog, policy, logger)
+
+	hash, err := auth.HashPassword("temp-pass")
+	if err != nil {
+		t.Fatalf("hashing password: %v", err)
+	}
+	if _, err := database.CreateLocalAdmin(context.Background(), "admin", hash); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+
+	sessionRec := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err = sm.CreateSession(sessionRec, sessionReq, "local", "", "admin", true, true); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+	cookies := sessionRec.Result().Cookies()
+
+	form := url.Values{}
+	form.Set("new_password", "short")
+	form.Set("confirm_password", "short")
+
+	req := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+
+	wrapped := sm.Middleware(http.HandlerFunc(h.ChangePassword))
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusFound {
+		t.Error("should not redirect when policy validation fails")
+	}
+	// Password should remain unchanged.
+	admin, err := database.GetLocalAdmin(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("getting admin: %v", err)
+	}
+	if err := auth.CheckPassword(admin.PasswordHash, "temp-pass"); err != nil {
+		t.Error("password should not have changed after policy violation")
+	}
+}
+
 // TestChangePassword_DBError covers admin_bootstrap.go:93-97 where
 // UpdateLocalAdminPassword fails and the handler renders a 500.
 func TestChangePassword_DBError(t *testing.T) {
@@ -302,7 +367,7 @@ func TestChangePassword_DBError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewBootstrapHandler(mockStore, sm, renderer, auditLog, logger)
+	h := NewBootstrapHandler(mockStore, sm, renderer, auditLog, auth.PasswordPolicy{}, logger)
 
 	// Create admin and session in real DB so session middleware can authenticate the request.
 	hash, err := auth.HashPassword("temp-pass")

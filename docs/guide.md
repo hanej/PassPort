@@ -8,23 +8,24 @@ Comprehensive documentation for PassPort, a self-service password management too
 
 1. [Getting Started](#1-getting-started)
 2. [Configuration](#2-configuration)
-3. [Identity Providers](#3-identity-providers)
-4. [User Dashboard](#4-user-dashboard)
-5. [Forgot Password](#5-forgot-password)
-6. [MFA Providers](#6-mfa-providers)
-7. [Password Expiration Notifications](#7-password-expiration-notifications)
-8. [Reports](#8-reports)
-9. [Email Configuration](#9-email-configuration)
-10. [Email Templates](#10-email-templates)
-11. [Admin Groups](#11-admin-groups)
-12. [User Mappings](#12-user-mappings)
-13. [Audit Log](#13-audit-log)
-14. [Branding](#14-branding)
-15. [Security](#15-security)
-16. [Deployment](#16-deployment)
-17. [Logging](#17-logging)
-18. [API and Health Checks](#18-api-and-health-checks)
-19. [Backup & Migration](#19-backup--migration)
+3. [Local Admin Account](#3-local-admin-account)
+4. [Identity Providers](#4-identity-providers)
+5. [User Dashboard](#5-user-dashboard)
+6. [Forgot Password](#6-forgot-password)
+7. [MFA Providers](#7-mfa-providers)
+8. [Password Expiration Notifications](#8-password-expiration-notifications)
+9. [Reports](#9-reports)
+10. [Email Configuration](#10-email-configuration)
+11. [Email Templates](#11-email-templates)
+12. [Admin Groups](#12-admin-groups)
+13. [User Mappings](#13-user-mappings)
+14. [Audit Log](#14-audit-log)
+15. [Branding](#15-branding)
+16. [Security](#16-security)
+17. [Deployment](#17-deployment)
+18. [Logging](#18-logging)
+19. [API and Health Checks](#19-api-and-health-checks)
+20. [Backup & Migration](#20-backup--migration)
 
 ---
 
@@ -71,7 +72,9 @@ The build uses `CGO_ENABLED=0` with `-trimpath -ldflags="-s -w"` to produce a fu
    msg="You will be required to change it on first login."
    ```
 
-4. **Log in** at `http://localhost:8080/login` with the `admin` username and the generated password. You will be forced to set a new password immediately.
+4. **Log in** at `https://localhost:8443/login` with the `admin` username and the generated password. You will be forced to set a new password immediately that meets the [password policy](#password-policy).
+
+   > **Self-signed certificate:** A self-signed TLS certificate is generated automatically at install time. Your browser will show a security warning on first access. Accept the exception or replace the certificate with a CA-signed one (see [TLS](#tls)).
 
 ### What Happens on Startup
 
@@ -101,17 +104,19 @@ Runtime settings are stored in the SQLite database and take effect immediately.
 
 ```yaml
 server:
-  # Listen address. Use ":8080" for all interfaces or "127.0.0.1:8080" for localhost only.
-  addr: ":8080"
+  # Listen address.
+  addr: ":8443"
 
-  # TLS certificate and key paths. Omit both for plain HTTP.
-  # Both must be set together.
-  tls_cert: ""
-  tls_key: ""
+  # TLS certificate and key paths. Both must be set together.
+  # A self-signed certificate is generated at install time.
+  # Replace with a CA-signed certificate for production.
+  tls_cert: /etc/passport/tls/cert.pem
+  tls_key: /etc/passport/tls/key.pem
 
   # Enable when running behind a reverse proxy that terminates TLS.
   # Trusts X-Forwarded-Proto to determine connection security.
   # Sets the Secure flag on cookies when the proxy reports HTTPS.
+  # Leave false (the default) when PassPort terminates TLS directly.
   trust_proxy: false
 
   # Grace period for in-flight requests during shutdown.
@@ -152,6 +157,20 @@ audit:
 
   # How often the database audit purge job runs.
   purge_freq: 1h
+
+local_admin:
+  # How many previous password hashes to retain. Users cannot reuse any of the
+  # last N passwords. Set to 0 to disable history checking.
+  password_history: 14
+
+  # Minimum password length.
+  min_length: 12
+
+  # Character-class requirements.
+  require_uppercase: true   # At least one uppercase letter (A–Z)
+  require_lowercase: true   # At least one lowercase letter (a–z)
+  require_digit: true       # At least one digit (0–9)
+  require_special: true     # At least one special character
 ```
 
 ### Configuration Priority
@@ -163,6 +182,7 @@ audit:
 | Log levels and formats | config.yaml | No (restart required) |
 | Session TTL | config.yaml | No (restart required) |
 | Audit retention | config.yaml | No (restart required) |
+| Local admin password policy | config.yaml | No (restart required) |
 | Identity providers | Admin UI (database) | Yes |
 | SMTP settings | Admin UI (database) | Yes |
 | MFA providers | Admin UI (database) | Yes |
@@ -173,7 +193,92 @@ audit:
 
 ---
 
-## 3. Identity Providers
+## 3. Local Admin Account
+
+PassPort ships with a single built-in local admin account that is created automatically on first startup. This account is independent of any LDAP directory — it always works even when all IDPs are offline.
+
+### Bootstrap
+
+On first start, PassPort generates a cryptographically random 24-character password and prints it **once** to the log:
+
+```
+msg="LOCAL ADMIN ACCOUNT CREATED"
+msg="Username: admin"
+msg="Password: Gx9kPm2vT8rNqLs4eJhD7mYv"
+msg="This password will NOT be shown again."
+msg="You will be required to change it on first login."
+```
+
+The account is flagged with `must_change_password = true`. You will be redirected to a forced password change screen immediately after the first login.
+
+### Password Policy
+
+All local admin password changes — including the forced change on first login — are subject to the policy defined in `config.yaml` under the `local_admin:` block.
+
+**Defaults:**
+
+| Requirement | Default |
+|-------------|---------|
+| Minimum length | 12 characters |
+| Uppercase letter (A–Z) | Required |
+| Lowercase letter (a–z) | Required |
+| Digit (0–9) | Required |
+| Special character | Required |
+| Password history | Last 14 passwords cannot be reused |
+
+The generated bootstrap password itself is recorded in the history, so it cannot be reused as the new password when you change it on first login.
+
+**Special characters** are defined as: `!@#$%^&*()-_=+[]{}|;:',.<>?/\`~"`
+
+Policy violations are shown as inline form errors — PassPort will not save the new password until all requirements are met.
+
+### Password History
+
+Every time a local admin successfully changes their password, the new hash is added to the history and the oldest entry beyond the configured `password_history` limit is removed. PassPort checks each history entry using bcrypt comparison, so the check is resistant to timing attacks.
+
+Set `password_history: 0` in `config.yaml` to disable history checking entirely.
+
+### CLI: Reset Admin Password
+
+If a local admin is locked out, an administrator with shell access can reset the password without starting the web server:
+
+```bash
+cd /opt/passport
+sudo -u passport bin/passport -config config.yaml -reset-admin-password admin
+```
+
+This generates a new random 24-character password, updates the account, flags it as `must_change_password`, records the new hash in the password history, and prints the new password to stdout:
+
+```
+Password for "admin" has been reset.
+New password: mKp3xQz8vLn2rBw7cJt5eDuh
+The account has been flagged to require a password change at next login.
+```
+
+The server does **not** need to be running. Any active sessions for that user will lose access on the next request (the session's password hash is no longer valid).
+
+### CLI: Force Password Change at Next Login
+
+To require a local admin to change their password at next login without changing the password itself:
+
+```bash
+sudo -u passport bin/passport -config config.yaml -force-password-change admin
+```
+
+Output:
+```
+Account "admin" will be required to change their password at next login.
+```
+
+This sets the `must_change_password` flag. The next time the user logs in they will be redirected to the forced password change screen before they can access any other page.
+
+### Managing Multiple Local Admins
+
+You can create additional local admin accounts via **Admin > Identity Providers** (not yet in the UI) or by importing a configuration file. The `-reset-admin-password` and `-force-password-change` flags accept any local admin username, not just `admin`.
+
+---
+
+## 4. Identity Providers
 
 Identity providers (IDPs) are the LDAP directories that PassPort connects to. Each IDP represents a single Active Directory domain or FreeIPA realm.
 
@@ -298,7 +403,7 @@ Use the toggle on the IDP list page to enable or disable a provider without dele
 
 ---
 
-## 4. User Dashboard
+## 5. User Dashboard
 
 ### Logging In
 
@@ -365,7 +470,7 @@ For the full Markdown syntax reference, see [markdownguide.org/basic-syntax](htt
 
 ---
 
-## 5. Forgot Password
+## 6. Forgot Password
 
 The forgot-password flow allows users to reset their directory password without logging in.
 
@@ -403,7 +508,7 @@ The forgot-password endpoint shares the login rate limiter (1 request/second, bu
 
 ---
 
-## 6. MFA Providers
+## 7. MFA Providers
 
 PassPort supports two MFA provider types: **Duo Security** (Universal Prompt) and **Email OTP** (one-time passcode sent to the user's email address). Multiple providers can be configured; each IDP can be assigned a specific provider or fall back to a global default.
 
@@ -497,7 +602,7 @@ Use the toggle on the MFA provider list to enable or disable a provider. To set 
 
 ---
 
-## 7. Password Expiration Notifications
+## 8. Password Expiration Notifications
 
 PassPort can scan LDAP directories on a cron schedule to find users with expiring passwords and send email notifications.
 
@@ -578,7 +683,7 @@ Cron schedules are reloaded from the database every 5 minutes. Changes made in t
 
 ---
 
-## 8. Reports
+## 9. Reports
 
 Reports are administrator-facing email summaries of account password health across an IDP. Unlike password expiration notifications (which email individual users), reports send a consolidated list of affected accounts to a configured set of recipients.
 
@@ -685,7 +790,7 @@ Report cron schedules are reloaded from the database every 5 minutes. Saving a r
 
 ---
 
-## 9. Email Configuration
+## 10. Email Configuration
 
 ### SMTP Setup
 
@@ -724,7 +829,7 @@ Use the **Send Test Email** button to send a test message to a specified address
 
 ---
 
-## 10. Email Templates
+## 11. Email Templates
 
 PassPort uses HTML email templates for all outbound messages. Templates are edited using a TinyMCE rich-text editor in the admin UI.
 
@@ -784,7 +889,7 @@ Use the **Reset to Default** button to restore a template to the built-in defaul
 
 ---
 
-## 11. Admin Groups
+## 12. Admin Groups
 
 Admin groups allow directory users to access the admin UI by mapping LDAP groups to the admin role.
 
@@ -812,7 +917,7 @@ The bootstrap local admin account (`admin`) always has admin access regardless o
 
 ---
 
-## 12. User Mappings
+## 13. User Mappings
 
 User mappings track the correlation between a user's authenticating account and their accounts on other IDPs.
 
@@ -848,7 +953,7 @@ Admins can delete individual mappings or all mappings for a user. This forces re
 
 ---
 
-## 13. Audit Log
+## 14. Audit Log
 
 PassPort maintains a dual audit log for all security-relevant events.
 
@@ -876,7 +981,7 @@ PassPort maintains a dual audit log for all security-relevant events.
 | `link_failed` | Account linking failed |
 | `mapping_reset` | Individual mapping deleted |
 | `mapping_reset_all` | All mappings for a user deleted |
-| `admin_password_change` | Local admin password changed |
+| `admin_password_change` | Local admin password changed (forced change, CLI reset, or dashboard) |
 | `mfa_create` | MFA provider created |
 | `mfa_update` | MFA provider updated |
 | `mfa_delete` | MFA provider deleted |
@@ -915,7 +1020,7 @@ Database entries older than `db_retention` are automatically purged at the inter
 
 ---
 
-## 14. Branding
+## 15. Branding
 
 PassPort supports whitelabel branding to match your organization's identity.
 
@@ -964,7 +1069,7 @@ Each identity provider can have its own logo. Set the logo when creating or edit
 
 ---
 
-## 15. Security
+## 16. Security
 
 ### Master Key Management
 
@@ -1016,13 +1121,38 @@ PassPort uses in-memory token-bucket rate limiting:
 
 Rate limits are applied per client IP address. Stale buckets are cleaned up every 10 minutes (30-minute inactivity threshold).
 
+### TLS
+
+PassPort defaults to TLS-only (`tls_cert` and `tls_key` are pre-configured). A self-signed RSA-4096 certificate valid for 10 years is generated automatically at install time by the `postinstall` script:
+
+```
+/etc/passport/tls/cert.pem   # Certificate (world-readable)
+/etc/passport/tls/key.pem    # Private key  (passport:passport, mode 640)
+```
+
+The certificate includes the server's hostname and `localhost`/`127.0.0.1` as Subject Alternative Names.
+
+**Replacing with a CA-signed certificate:**
+
+```bash
+# Replace the self-signed files in-place.
+# The filenames must remain the same, or update config.yaml.
+sudo cp fullchain.pem /etc/passport/tls/cert.pem
+sudo cp privkey.pem   /etc/passport/tls/key.pem
+sudo chown passport:passport /etc/passport/tls/*.pem
+sudo chmod 640 /etc/passport/tls/key.pem
+sudo systemctl restart passport
+```
+
 ### Secure Cookies
 
 Session cookies have the `Secure` flag set when:
-- TLS is enabled directly (via `tls_cert` and `tls_key`), or
+- TLS is enabled directly via `tls_cert` and `tls_key` (the default), or
 - `trust_proxy` is set to `true` (proxy terminates TLS)
 
 Cookies are always `HttpOnly` and use `SameSite=Lax`.
+
+> **Common misconfiguration:** If `trust_proxy: true` is set but PassPort is accessed directly over HTTP (no proxy), cookies will be marked `Secure` but sent over a plain HTTP connection. The browser will silently discard them, making login appear to work but sessions not persist. Only set `trust_proxy: true` when a TLS-terminating proxy is in front.
 
 ### trust_proxy
 
@@ -1031,11 +1161,11 @@ When `trust_proxy: true`, PassPort trusts the `X-Forwarded-Proto` header from th
 - The `Secure` flag on cookies
 - CSRF Referer validation
 
-Only enable this when PassPort is behind a trusted reverse proxy. Enabling it when directly exposed to the internet allows attackers to forge the header.
+Leave this `false` (the default) when PassPort terminates TLS directly. Only enable it when PassPort is behind a trusted reverse proxy and the proxy is configured to strip or override `X-Forwarded-Proto`.
 
 ---
 
-## 16. Deployment
+## 17. Deployment
 
 ### Directory Layout
 
@@ -1052,6 +1182,9 @@ Only enable this when PassPort is behind a trusted reverse proxy. Enabling it wh
 /etc/passport/
   key                    # Master encryption key (600 permissions)
   env                    # Optional environment file for systemd
+  tls/
+    cert.pem             # TLS certificate (644)
+    key.pem              # TLS private key  (640, passport:passport)
 ```
 
 ### Install Script
@@ -1064,12 +1197,13 @@ sudo bash deploy/install.sh
 
 It performs:
 1. Creates a `passport` system user (no login shell, no home directory)
-2. Creates `/opt/passport/bin/`, `/opt/passport/uploads/`, `/etc/passport/`
+2. Creates `/opt/passport/bin/`, `/opt/passport/uploads/`, `/etc/passport/tls/`
 3. Copies the binary to `/opt/passport/bin/passport`
 4. Generates a 32-byte master key at `/etc/passport/key` (if not present)
 5. Creates `/etc/passport/env` for optional environment variables
-6. Sets ownership and permissions
-7. Installs the systemd unit file
+6. Generates a self-signed TLS certificate at `/etc/passport/tls/` (if not present)
+7. Sets ownership and permissions
+8. Installs the systemd unit file
 
 ### systemd Service
 
@@ -1163,7 +1297,7 @@ Caddy automatically sets the required headers.
 
 ---
 
-## 17. Logging
+## 18. Logging
 
 PassPort supports dual logging with independent configuration for stdout and file output.
 
@@ -1374,7 +1508,7 @@ On Windows, rely on stdout logging captured by the Windows Service Manager or NS
 
 ---
 
-## 18. API and Health Checks
+## 19. API and Health Checks
 
 PassPort exposes two health check endpoints that are exempt from CSRF protection and authentication. These are designed for load balancers, monitoring systems, and orchestrators.
 
@@ -1439,7 +1573,7 @@ option httpchk GET /readyz
 http-check expect status 200
 ```
 
-## 19. Backup & Migration
+## 20. Backup & Migration
 
 PassPort provides tools for backing up configuration and migrating to a new installation. There are two modes:
 

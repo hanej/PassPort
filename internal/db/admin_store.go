@@ -131,3 +131,57 @@ func (d *DB) UpdateLocalAdminPassword(ctx context.Context, username, passwordHas
 
 	return nil
 }
+
+// AddPasswordHistory inserts a new password hash into the history for username,
+// then deletes all but the most-recent keepN entries. keepN <= 0 skips trimming.
+func (d *DB) AddPasswordHistory(ctx context.Context, username, passwordHash string, keepN int) error {
+	_, err := d.writer.ExecContext(ctx, `
+		INSERT INTO local_admin_password_history (username, password_hash)
+		VALUES (?, ?)`, username, passwordHash)
+	if err != nil {
+		return fmt.Errorf("insert password history: %w", err)
+	}
+
+	if keepN > 0 {
+		_, err = d.writer.ExecContext(ctx, `
+			DELETE FROM local_admin_password_history
+			WHERE username = ?
+			  AND id NOT IN (
+			    SELECT id FROM local_admin_password_history
+			    WHERE username = ?
+			    ORDER BY id DESC
+			    LIMIT ?
+			  )`, username, username, keepN)
+		if err != nil {
+			return fmt.Errorf("trim password history: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// GetPasswordHistory returns all stored password hashes for username, most-recent-first.
+func (d *DB) GetPasswordHistory(ctx context.Context, username string) ([]string, error) {
+	rows, err := d.reader.QueryContext(ctx, `
+		SELECT password_hash
+		FROM local_admin_password_history
+		WHERE username = ?
+		ORDER BY id DESC`, username)
+	if err != nil {
+		return nil, fmt.Errorf("query password history: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var hashes []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, fmt.Errorf("scan password history: %w", err)
+		}
+		hashes = append(hashes, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate password history: %w", err)
+	}
+	return hashes, nil
+}

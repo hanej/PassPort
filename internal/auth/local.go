@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -14,6 +15,52 @@ import (
 
 // passwordCharset is the set of characters used for random password generation.
 const passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+"
+
+// specialChars is the set recognised as "special" for policy enforcement.
+const specialChars = "!@#$%^&*()-_=+[]{}|;:',.<>?/`~\"\\"
+
+// PasswordPolicy defines the complexity and history requirements for local admin passwords.
+type PasswordPolicy struct {
+	MinLength        int
+	RequireUppercase bool
+	RequireLowercase bool
+	RequireDigit     bool
+	RequireSpecial   bool
+	// HistoryLen is how many previous password hashes to keep to prevent reuse.
+	HistoryLen int
+}
+
+// ValidatePasswordPolicy returns an error describing the first unmet policy constraint,
+// or nil if the password satisfies all constraints.
+func ValidatePasswordPolicy(password string, policy PasswordPolicy) error {
+	if len(password) < policy.MinLength {
+		return fmt.Errorf("password must be at least %d characters long", policy.MinLength)
+	}
+	if policy.RequireUppercase && !strings.ContainsAny(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+		return fmt.Errorf("password must contain at least one uppercase letter")
+	}
+	if policy.RequireLowercase && !strings.ContainsAny(password, "abcdefghijklmnopqrstuvwxyz") {
+		return fmt.Errorf("password must contain at least one lowercase letter")
+	}
+	if policy.RequireDigit && !strings.ContainsAny(password, "0123456789") {
+		return fmt.Errorf("password must contain at least one digit")
+	}
+	if policy.RequireSpecial && !strings.ContainsAny(password, specialChars) {
+		return fmt.Errorf("password must contain at least one special character")
+	}
+	return nil
+}
+
+// CheckPasswordHistory returns an error if newPassword matches any of the supplied
+// bcrypt hashes (i.e. the password has been used recently).
+func CheckPasswordHistory(newPassword string, hashes []string) error {
+	for _, h := range hashes {
+		if err := bcrypt.CompareHashAndPassword([]byte(h), []byte(newPassword)); err == nil {
+			return fmt.Errorf("password has been used recently and cannot be reused")
+		}
+	}
+	return nil
+}
 
 // HashPassword hashes a password using bcrypt with default cost.
 func HashPassword(password string) (string, error) {
@@ -90,7 +137,8 @@ func GeneratePasswordWithPolicy(length int, allowUpper, allowLower, allowDigits 
 
 // Bootstrap checks if a local admin exists, creates one if not.
 // Returns the generated password (only on first creation) or empty string if already exists.
-func Bootstrap(ctx context.Context, store db.AdminStore, logger *slog.Logger) (string, error) {
+// keepHistoryN controls how many history entries to retain (passed to AddPasswordHistory).
+func Bootstrap(ctx context.Context, store db.AdminStore, keepHistoryN int, logger *slog.Logger) (string, error) {
 	_, err := store.GetLocalAdmin(ctx, "admin")
 	if err == nil {
 		// Admin already exists.
@@ -115,6 +163,11 @@ func Bootstrap(ctx context.Context, store db.AdminStore, logger *slog.Logger) (s
 
 	if _, err := store.CreateLocalAdmin(ctx, "admin", hash); err != nil {
 		return "", fmt.Errorf("creating bootstrap admin: %w", err)
+	}
+
+	// Record the initial hash in history so it cannot be immediately reused.
+	if err := store.AddPasswordHistory(ctx, "admin", hash, keepHistoryN); err != nil {
+		logger.Warn("failed to record initial password history", "error", err)
 	}
 
 	logger.Info("local admin created", slog.String("username", "admin"))
