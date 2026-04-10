@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/csrf"
+	csrf "filippo.io/csrf/gorilla"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -340,6 +340,12 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sanitizeHeader removes CR and LF characters from an email header value to
+// prevent email header injection attacks.
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
 // sendEmail sends an HTML email using the provided SMTP configuration.
 func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody string) error {
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
@@ -357,7 +363,8 @@ func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody 
 		"Content-Type: text/html; charset=UTF-8\r\n"+
 		"\r\n"+
 		"%s\r\n",
-		fromName, cfg.FromAddress, to, subject,
+		sanitizeHeader(fromName), sanitizeHeader(cfg.FromAddress),
+		sanitizeHeader(to), sanitizeHeader(subject),
 		time.Now().Format(time.RFC1123Z), htmlBody,
 	)
 

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	csrf "filippo.io/csrf/gorilla"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-ldap/ldap/v3"
-	"github.com/gorilla/csrf"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
@@ -64,9 +64,18 @@ func NewAdminIDPHandler(
 // handleLogoUpload processes an optional logo file upload for an IDP.
 // Returns the logo URL path (e.g., "/uploads/idp-logo-corp-ad.png") or the existing value.
 func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoURL string) string {
+	absUploads, err := filepath.Abs(h.uploadsDir)
+	if err != nil {
+		h.logger.Error("failed to resolve uploads dir", "error", err)
+		return currentLogoURL
+	}
+
 	if r.FormValue("remove_logo") == "1" {
 		if currentLogoURL != "" {
-			_ = os.Remove(filepath.Join(h.uploadsDir, filepath.Base(currentLogoURL)))
+			targetPath, err := filepath.Abs(filepath.Join(h.uploadsDir, filepath.Base(currentLogoURL)))
+			if err == nil && strings.HasPrefix(targetPath, absUploads+string(filepath.Separator)) {
+				_ = os.Remove(targetPath)
+			}
 		}
 		return ""
 	}
@@ -83,7 +92,11 @@ func (h *AdminIDPHandler) handleLogoUpload(r *http.Request, idpID, currentLogoUR
 	}
 
 	destName := "idp-logo-" + idpID + ext
-	destPath := filepath.Join(h.uploadsDir, destName)
+	destPath, err := filepath.Abs(filepath.Join(h.uploadsDir, destName))
+	if err != nil || !strings.HasPrefix(destPath, absUploads+string(filepath.Separator)) {
+		h.logger.Error("computed IDP logo path escapes uploads directory", "idp_id", idpID)
+		return currentLogoURL
+	}
 
 	out, err := os.Create(destPath)
 	if err != nil {
