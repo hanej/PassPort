@@ -414,11 +414,18 @@ function initAttributeMappingRows() {
             if (sel.value) canonicals.push(sel.value);
         });
 
-        var html = '<option value="">Select...</option>';
+        while (sourceSelect.options.length > 0) { sourceSelect.remove(0); }
+        var defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Select...';
+        sourceSelect.appendChild(defaultOpt);
         canonicals.forEach(function (name) {
-            html += '<option value="' + name + '"' + (name === currentVal ? ' selected' : '') + '>' + name + '</option>';
+            var opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            if (name === currentVal) { opt.selected = true; }
+            sourceSelect.appendChild(opt);
         });
-        sourceSelect.innerHTML = html;
     }
 
     // Initialize correlation source dropdown on page load.
