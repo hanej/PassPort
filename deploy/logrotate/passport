@@ -1,0 +1,13 @@
+/opt/passport/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 passport passport
+    sharedscripts
+    postrotate
+        systemctl reload passport >/dev/null 2>&1 || true
+    endscript
+}
