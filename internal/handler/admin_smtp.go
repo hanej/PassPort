@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
+	"io"
 	"log/slog"
+	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/mail"
 	"net/smtp"
-	"strings"
 	"time"
 
 	"github.com/hanej/passport/internal/audit"
@@ -337,10 +339,31 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// sanitizeHeader removes CR and LF characters from an email header value to
-// prevent email header injection attacks.
-func sanitizeHeader(s string) string {
-	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+// buildMIMEMessage constructs a properly encoded MIME email message.
+// Headers use net/mail address formatting and RFC 2047 Q-encoding for the
+// subject. The HTML body is encoded as quoted-printable per RFC 2045.
+func buildMIMEMessage(fromName, fromAddr, to, subject, htmlBody string) ([]byte, error) {
+	from := mail.Address{Name: fromName, Address: fromAddr}
+	recipient := mail.Address{Address: to}
+
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "From: %s\r\n", from.String())
+	fmt.Fprintf(&buf, "To: %s\r\n", recipient.String())
+	fmt.Fprintf(&buf, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
+	fmt.Fprintf(&buf, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
+	buf.WriteString("MIME-Version: 1.0\r\n")
+	buf.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	buf.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
+	buf.WriteString("\r\n")
+
+	qw := quotedprintable.NewWriter(&buf)
+	if _, err := io.WriteString(qw, htmlBody); err != nil {
+		return nil, err
+	}
+	if err := qw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // sendEmail sends an HTML email using the provided SMTP configuration.
@@ -352,18 +375,10 @@ func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody 
 		fromName = "PassPort"
 	}
 
-	msg := fmt.Sprintf("From: %s <%s>\r\n"+
-		"To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"Date: %s\r\n"+
-		"MIME-Version: 1.0\r\n"+
-		"Content-Type: text/html; charset=UTF-8\r\n"+
-		"\r\n"+
-		"%s\r\n",
-		sanitizeHeader(fromName), sanitizeHeader(cfg.FromAddress),
-		sanitizeHeader(to), sanitizeHeader(subject),
-		time.Now().Format(time.RFC1123Z), htmlBody,
-	)
+	msg, err := buildMIMEMessage(fromName, cfg.FromAddress, to, subject, htmlBody)
+	if err != nil {
+		return fmt.Errorf("building message: %w", err)
+	}
 
 	// Set up authentication if credentials are provided.
 	var auth smtp.Auth
