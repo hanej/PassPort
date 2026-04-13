@@ -119,6 +119,19 @@ func main() {
 		os.Exit(0)
 	}
 
+	// For admin management commands, the config file must already exist so that
+	// the correct database path is used.  Creating a default config here would
+	// silently open an empty database and make the operation appear to fail.
+	isAdminCmd := *resetAdminPassword != "" || *forcePasswordChange != ""
+	if isAdminCmd {
+		if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+			fmt.Fprintf(os.Stderr, "config file %q not found\n", *configPath)
+			fmt.Fprintf(os.Stderr, "Use -config to point at the existing config file, e.g.:\n")
+			fmt.Fprintf(os.Stderr, "  passport -config /etc/passport/config.yaml -reset-admin-password admin\n")
+			os.Exit(1)
+		}
+	}
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
@@ -248,7 +261,14 @@ func main() {
 		HistoryLen:       cfg.LocalAdmin.PasswordHistory,
 	}
 
+	generatedPassword, err := auth.Bootstrap(ctx, database, policy.HistoryLen, logger)
+	if err != nil {
+		logger.Error("failed to bootstrap local admin", "error", err)
+		os.Exit(1)
+	}
+
 	// Handle admin management CLI commands — these open the DB, act, then exit.
+	// Bootstrap runs first to ensure the admin account exists on a fresh database.
 	if *resetAdminPassword != "" {
 		_, err := runResetAdminPassword(ctx, database, *resetAdminPassword, policy.HistoryLen, os.Stdout, logger)
 		if err != nil {
@@ -265,11 +285,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	generatedPassword, err := auth.Bootstrap(ctx, database, policy.HistoryLen, logger)
-	if err != nil {
-		logger.Error("failed to bootstrap local admin", "error", err)
-		os.Exit(1)
-	}
 	if generatedPassword != "" {
 		logger.Info("========================================")
 		logger.Info("LOCAL ADMIN ACCOUNT CREATED")
