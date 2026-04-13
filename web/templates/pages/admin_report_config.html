@@ -270,10 +270,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // CSRF token
-    var csrfInput = document.querySelector('input[name="gorilla.csrf.Token"]');
-    var csrfToken = csrfInput ? csrfInput.value : '';
-
     // Send Now button
     var sendBtn = document.getElementById('report-send-btn');
     if (sendBtn) {
@@ -286,8 +282,7 @@ document.addEventListener('DOMContentLoaded', function() {
             resultSpan.textContent = '';
 
             fetch('/admin/reports/' + idpId + '/' + reportType + '/send', {
-                method: 'POST',
-                headers: {'X-CSRF-Token': csrfToken}
+                method: 'POST'
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -321,8 +316,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modal.show();
 
             fetch('/admin/reports/' + idpId + '/' + reportType + '/preview', {
-                method: 'POST',
-                headers: {'X-CSRF-Token': csrfToken}
+                method: 'POST'
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
