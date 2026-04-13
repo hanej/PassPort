@@ -135,8 +135,7 @@ function previewTemplate() {
     fetch('/admin/email-templates/preview', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': document.querySelector('input[name="gorilla.csrf.Token"]').value
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify({
             template_type: '{{.Data.TemplateType}}',
