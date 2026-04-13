@@ -388,11 +388,6 @@
     var mode = {{if eq .Data.Mode "edit"}}"edit"{{else}}"create"{{end}};
     var idpID = {{if eq .Data.Mode "edit"}}{{.Data.IDP.ID | js}}{{else}}""{{end}};
 
-    function csrfToken() {
-        var el = document.querySelector('input[name="gorilla.csrf.Token"]');
-        return el ? el.value : '';
-    }
-
     window.uploadLogo = function () {
         var fileInput = document.getElementById('logo_file');
         var errDiv = document.getElementById('logo-upload-error');
@@ -423,7 +418,6 @@
 
         fetch('/admin/idp/' + encodeURIComponent(idpID) + '/logo', {
             method: 'POST',
-            headers: {'X-CSRF-Token': csrfToken()},
             body: formData
         })
         .then(function (res) { return res.json().then(function (d) { return {ok: res.ok, data: d}; }); })
