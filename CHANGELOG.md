@@ -4,6 +4,21 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **IDP account not auto-linked when MFA is enforced on login** — Users logging in via an IDP with MFA-on-login enabled were presented with the "Link Account" form instead of the "Change Password" form on the dashboard. The self-mapping and correlation logic ran after the MFA redirect in `loginProvider`, so the account was never linked before the early return. Both blocks are now executed before the MFA redirect, ensuring the mapping is persisted on every successful authentication regardless of whether MFA is required.
+- **Audit log Provider column always blank** — `ListAudit` now `LEFT JOIN`s `identity_providers` so that the provider friendly name is resolved for all existing rows that have a `provider_id` but no stored `provider_name`. Going forward, `audit.Logger` resolves and stores `ProviderName` at write time by looking up the IDP record, so the value is also present in the flat `audit.log` file.
+- **Audit log Provider Name missing in Entry Details modal** — the modal read `ProviderName` from the table row data attribute, which was blank for the same reason as above. Both the read and write path fixes above ensure it is now populated.
+- **`GetIDP` lookup failure in audit logger silently swallowed** — if the IDP record could not be fetched when resolving a provider name at audit write time, the error was discarded without any log entry. It is now logged at `Warn` level.
+- **Correlation pre-flight DB failures invisible** — when `ListEnabledIDPs` or `ListMappings` failed before spawning the background correlation goroutine, the code silently fell back to running correlation with no log output. Both failure paths are now logged at `Warn` with the originating error.
+
+### Added
+- **Provider filter on audit log page** — a Provider dropdown has been added to the audit log filter bar. `AuditFilter` gains a `ProviderID` field; the handler loads the IDP list and passes it to the template; the selection is preserved across filter submissions.
+- `"self-mapping created"` promoted from `DEBUG` to `INFO` so auto-link events are visible in production log output without enabling debug mode.
+
+---
+
 ## [v1.1.2] - 2026-04-13
 
 ### Fixed
