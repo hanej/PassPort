@@ -394,3 +394,86 @@ func TestStartDBPurge_DBError(t *testing.T) {
 	cancel()
 	time.Sleep(30 * time.Millisecond)
 }
+
+// TestLog_ResolvesProviderName verifies that Log populates ProviderName from the
+// IDP registry when the caller leaves it empty. This ensures the audit modal and
+// the provider column are always populated even when callers only set ProviderID.
+func TestLog_ResolvesProviderName(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	// Create an IDP so GetIDP can return a friendly name.
+	if err := d.CreateIDP(ctx, &db.IdentityProviderRecord{
+		ID:           "redhat-idm",
+		FriendlyName: "Red Hat IDM",
+		ProviderType: "freeipa",
+		Enabled:      true,
+		ConfigJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+
+	l, _ := newTestLogger(t, d)
+
+	// Log an entry with only ProviderID set (no ProviderName) — the typical
+	// call pattern used by loginProvider and other handlers.
+	entry := &db.AuditEntry{
+		Username:   "rtripathy",
+		SourceIP:   "10.0.0.1",
+		Action:     ActionLogin,
+		ProviderID: "redhat-idm",
+		Result:     ResultSuccess,
+		Details:    "IDP login",
+	}
+	l.Log(ctx, entry)
+
+	// ProviderName should have been resolved in-place before being stored.
+	if entry.ProviderName != "Red Hat IDM" {
+		t.Errorf("expected ProviderName %q, got %q", "Red Hat IDM", entry.ProviderName)
+	}
+
+	// Verify the stored DB row also has the resolved name.
+	entries, _, err := d.ListAudit(ctx, db.AuditFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("listing audit: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one audit entry")
+	}
+	if entries[0].ProviderName != "Red Hat IDM" {
+		t.Errorf("DB row ProviderName: expected %q, got %q", "Red Hat IDM", entries[0].ProviderName)
+	}
+}
+
+// TestLog_ProviderNameNotOverwritten verifies that an explicitly set ProviderName
+// is preserved and not replaced by the IDP lookup.
+func TestLog_ProviderNameNotOverwritten(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	if err := d.CreateIDP(ctx, &db.IdentityProviderRecord{
+		ID:           "corp-ad",
+		FriendlyName: "Corporate AD",
+		ProviderType: "ad",
+		Enabled:      true,
+		ConfigJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+
+	l, _ := newTestLogger(t, d)
+
+	entry := &db.AuditEntry{
+		Username:     "jdoe",
+		SourceIP:     "10.0.0.2",
+		Action:       ActionPasswordChange,
+		ProviderID:   "corp-ad",
+		ProviderName: "My Custom Name",
+		Result:       ResultSuccess,
+	}
+	l.Log(ctx, entry)
+
+	if entry.ProviderName != "My Custom Name" {
+		t.Errorf("expected ProviderName to remain %q, got %q", "My Custom Name", entry.ProviderName)
+	}
+}

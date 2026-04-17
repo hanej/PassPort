@@ -35,12 +35,21 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <label for="filter_from" class="form-label">From Date</label>
+                <label for="filter_provider" class="form-label">Provider</label>
+                <select class="form-select form-select-sm" id="filter_provider" name="provider_id">
+                    <option value="">All Providers</option>
+                    {{range .Data.IDPs}}
+                    <option value="{{.ID}}" {{if eq $.Data.Filter.ProviderID .ID}}selected{{end}}>{{.FriendlyName}}</option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label for="filter_from" class="form-label">From</label>
                 <input type="date" class="form-control form-control-sm" id="filter_from" name="start_date"
                        value="{{.Data.Filter.StartDate}}">
             </div>
-            <div class="col-md-2">
-                <label for="filter_to" class="form-label">To Date</label>
+            <div class="col-md-1">
+                <label for="filter_to" class="form-label">To</label>
                 <input type="date" class="form-control form-control-sm" id="filter_to" name="end_date"
                        value="{{.Data.Filter.EndDate}}">
             </div>
