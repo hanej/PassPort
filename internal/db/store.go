@@ -158,13 +158,14 @@ type AuditEntry struct {
 
 // AuditFilter holds filter parameters for querying the audit log.
 type AuditFilter struct {
-	Username  string
-	Action    string
-	Result    string
-	StartDate string
-	EndDate   string
-	Limit     int
-	Offset    int
+	Username   string
+	Action     string
+	Result     string
+	ProviderID string
+	StartDate  string
+	EndDate    string
+	Limit      int
+	Offset     int
 }
 
 // AuditStore manages the audit log.
@@ -172,6 +173,7 @@ type AuditStore interface {
 	AppendAudit(ctx context.Context, entry *AuditEntry) error
 	ListAudit(ctx context.Context, filter AuditFilter) ([]AuditEntry, int, error)
 	PurgeAuditBefore(ctx context.Context, before time.Time) (int64, error)
+	GetIDP(ctx context.Context, id string) (*IdentityProviderRecord, error)
 }
 
 // UserIDPMapping represents a user-to-IDP account link.

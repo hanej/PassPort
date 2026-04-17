@@ -214,24 +214,10 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 		Details:    "IDP login",
 	})
 
-	// Check if MFA on login is required for IDP users.
-	mfaRedirect := h.shouldEnforceMFAOnLogin(r.Context(), providerID)
-	if mfaRedirect && newSessionID != "" {
-		if err := h.store.UpdateSessionMFA(r.Context(), newSessionID, true, ""); err != nil {
-			h.logger.Error("failed to set MFA pending on session", "error", err)
-			// Fall through to dashboard on error (fail open).
-		} else {
-			h.logger.Info("MFA required on login, redirecting to /mfa",
-				"username", username,
-				"provider_id", providerID,
-			)
-			http.Redirect(w, r, "/mfa", http.StatusFound)
-			return
-		}
-	}
-
 	// Create a self-mapping synchronously so it's visible on the first
 	// dashboard render. Try uid first (FreeIPA), then sAMAccountName (AD).
+	// This must happen before any MFA redirect so the mapping exists regardless
+	// of whether MFA is enforced on login.
 	dn, dnErr := provider.SearchUser(r.Context(), "uid", username)
 	if dnErr != nil {
 		dn, dnErr = provider.SearchUser(r.Context(), "sAMAccountName", username)
@@ -268,7 +254,7 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 					"error", err,
 				)
 			} else {
-				h.logger.Debug("self-mapping created",
+				h.logger.Info("self-mapping created",
 					"provider_id", providerID,
 					"username", username,
 					"target_dn", dn,
@@ -284,7 +270,19 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 		runCorrelation := true
 		enabledIDPs, idpErr := h.store.ListEnabledIDPs(r.Context())
 		existingMappings, mapErr := h.store.ListMappings(r.Context(), providerID, username)
-		if idpErr == nil && mapErr == nil {
+		if idpErr != nil {
+			h.logger.Warn("correlation pre-flight: failed to list enabled IDPs, running correlation as fallback",
+				"provider_id", providerID,
+				"username", username,
+				"error", idpErr,
+			)
+		} else if mapErr != nil {
+			h.logger.Warn("correlation pre-flight: failed to list existing mappings, running correlation as fallback",
+				"provider_id", providerID,
+				"username", username,
+				"error", mapErr,
+			)
+		} else {
 			linked := make(map[string]struct{}, len(existingMappings))
 			for _, m := range existingMappings {
 				linked[m.TargetIDPID] = struct{}{}
@@ -312,6 +310,22 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 				"provider_id", providerID,
 				"username", username,
 			)
+		}
+	}
+
+	// Check if MFA on login is required for IDP users.
+	mfaRedirect := h.shouldEnforceMFAOnLogin(r.Context(), providerID)
+	if mfaRedirect && newSessionID != "" {
+		if err := h.store.UpdateSessionMFA(r.Context(), newSessionID, true, ""); err != nil {
+			h.logger.Error("failed to set MFA pending on session", "error", err)
+			// Fall through to dashboard on error (fail open).
+		} else {
+			h.logger.Info("MFA required on login, redirecting to /mfa",
+				"username", username,
+				"provider_id", providerID,
+			)
+			http.Redirect(w, r, "/mfa", http.StatusFound)
+			return
 		}
 	}
 

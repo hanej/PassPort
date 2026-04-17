@@ -57,6 +57,18 @@ func (l *Logger) ReopenFile() error {
 // File write errors are logged but do not cause the method to fail,
 // since the database is the primary queryable store.
 func (l *Logger) Log(ctx context.Context, entry *db.AuditEntry) {
+	// Resolve ProviderName from the IDP registry when the caller did not set it.
+	if entry.ProviderID != "" && entry.ProviderName == "" {
+		if rec, err := l.store.GetIDP(ctx, entry.ProviderID); err != nil {
+			l.slog.Warn("audit: could not resolve provider name",
+				"provider_id", entry.ProviderID,
+				"error", err,
+			)
+		} else if rec != nil {
+			entry.ProviderName = rec.FriendlyName
+		}
+	}
+
 	// Write to database
 	if err := l.store.AppendAudit(ctx, entry); err != nil {
 		l.slog.Error("failed to write audit entry to database",
