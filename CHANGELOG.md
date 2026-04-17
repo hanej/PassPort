@@ -4,7 +4,7 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
-## [Unreleased]
+## [v1.1.3] - 2026-04-17
 
 ### Fixed
 - **IDP account not auto-linked when MFA is enforced on login** — Users logging in via an IDP with MFA-on-login enabled were presented with the "Link Account" form instead of the "Change Password" form on the dashboard. The self-mapping and correlation logic ran after the MFA redirect in `loginProvider`, so the account was never linked before the early return. Both blocks are now executed before the MFA redirect, ensuring the mapping is persisted on every successful authentication regardless of whether MFA is required.
