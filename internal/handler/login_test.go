@@ -1345,3 +1345,115 @@ func TestShouldEnforceMFA_HealthCheckFails(t *testing.T) {
 		t.Error("expected false when HealthCheck fails (fail-open)")
 	}
 }
+
+// TestLoginProvider_SelfMappingCreatedBeforeMFARedirect is a regression test for the
+// bug where the self-mapping (auto-link) was only created after the MFA redirect block.
+// When MFA is enforced on login, loginProvider returned early at the MFA redirect and
+// never reached the self-mapping code. After MFA completion the user landed on the
+// dashboard showing the "Link Account" form instead of "Change Password".
+//
+// The fix moves self-mapping creation before the MFA redirect so the mapping is
+// persisted regardless of whether MFA is required.
+func TestLoginProvider_SelfMappingCreatedBeforeMFARedirect(t *testing.T) {
+	database := setupTestDB(t)
+	logger := testLogger()
+
+	mfaRecord := &db.MFAProviderRecord{
+		ID:           "emailotp-selfmap",
+		Name:         "Email OTP",
+		ProviderType: "email",
+		Enabled:      true,
+		ConfigJSON:   `{"otp_length":6,"otp_ttl_minutes":5}`,
+	}
+	mockStore := &mockLoginErrStore{
+		DB:                         database,
+		getMFALoginRequiredVal:     true,
+		getMFAProviderForIDPRecord: mfaRecord,
+	}
+
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	renderer := loginStubRenderer(t)
+	registry := idp.NewRegistry(logger)
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
+	if err != nil {
+		t.Fatalf("creating temp audit file: %v", err)
+	}
+	_ = tmpFile.Close()
+	auditLog, err := audit.NewLogger(database, tmpFile.Name(), logger)
+	if err != nil {
+		t.Fatalf("creating audit logger: %v", err)
+	}
+	t.Cleanup(func() { _ = auditLog.Close() })
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating crypto key: %v", err)
+	}
+	cryptoSvc, err := crypto.NewService(key, 1)
+	if err != nil {
+		t.Fatalf("creating crypto service: %v", err)
+	}
+
+	expectedDN := "uid=rtripathy,cn=users,cn=accounts,dc=idm,dc=ftscc,dc=net"
+	registry.Register("redhat-idm", &mockProviderWithDN{
+		mockProvider: mockProvider{id: "redhat-idm"},
+		searchUserDN: expectedDN,
+	})
+
+	if err := database.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID:           "redhat-idm",
+		FriendlyName: "Red Hat IDM",
+		ProviderType: "freeipa",
+		Enabled:      true,
+		ConfigJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+
+	h := NewLoginHandler(mockStore, sm, registry, &mockCorrelator{}, cryptoSvc, renderer, auditLog, logger)
+
+	form := url.Values{}
+	form.Set("provider_id", "redhat-idm")
+	form.Set("username", "rtripathy")
+	form.Set("password", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.Login(rec, req)
+
+	// MFA is required — must redirect to /mfa.
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/mfa" {
+		t.Errorf("expected redirect to /mfa, got %s", loc)
+	}
+
+	// The self-mapping must already exist even though the user was redirected to MFA
+	// and has not yet reached the dashboard. Before the fix, it would not exist here.
+	mappings, err := database.ListMappings(context.Background(), "redhat-idm", "rtripathy")
+	if err != nil {
+		t.Fatalf("listing mappings: %v", err)
+	}
+
+	var selfMapping *db.UserIDPMapping
+	for i := range mappings {
+		if mappings[i].AuthProviderID == "redhat-idm" && mappings[i].TargetIDPID == "redhat-idm" {
+			selfMapping = &mappings[i]
+			break
+		}
+	}
+	if selfMapping == nil {
+		t.Fatal("self-mapping not created before MFA redirect; user would see 'Link Account' instead of 'Change Password' on the dashboard")
+	}
+	if selfMapping.TargetAccountDN != expectedDN {
+		t.Errorf("expected target DN %q, got %q", expectedDN, selfMapping.TargetAccountDN)
+	}
+	if selfMapping.LinkType != "auto" {
+		t.Errorf("expected link type 'auto', got %q", selfMapping.LinkType)
+	}
+	if selfMapping.VerifiedAt == nil {
+		t.Error("expected verified_at to be set on self-mapping")
+	}
+}

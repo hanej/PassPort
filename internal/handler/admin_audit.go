@@ -41,6 +41,7 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		"username_filter", r.URL.Query().Get("username"),
 		"action_filter", r.URL.Query().Get("action"),
 		"result_filter", r.URL.Query().Get("result"),
+		"provider_filter", r.URL.Query().Get("provider_id"),
 	)
 
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -49,13 +50,14 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := db.AuditFilter{
-		Username:  r.URL.Query().Get("username"),
-		Action:    r.URL.Query().Get("action"),
-		Result:    r.URL.Query().Get("result"),
-		StartDate: r.URL.Query().Get("start_date"),
-		EndDate:   r.URL.Query().Get("end_date"),
-		Limit:     auditPageSize,
-		Offset:    (page - 1) * auditPageSize,
+		Username:   r.URL.Query().Get("username"),
+		Action:     r.URL.Query().Get("action"),
+		Result:     r.URL.Query().Get("result"),
+		ProviderID: r.URL.Query().Get("provider_id"),
+		StartDate:  r.URL.Query().Get("start_date"),
+		EndDate:    r.URL.Query().Get("end_date"),
+		Limit:      auditPageSize,
+		Offset:     (page - 1) * auditPageSize,
 	}
 
 	entries, totalCount, err := h.store.ListAudit(r.Context(), filter)
@@ -69,6 +71,13 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		"result_count", len(entries),
 		"total_count", totalCount,
 	)
+
+	// Load IDPs for the provider filter dropdown. Failures are non-fatal.
+	idps, err := h.store.ListEnabledIDPs(r.Context())
+	if err != nil {
+		h.logger.Warn("failed to load IDPs for audit filter dropdown", "error", err)
+		idps = nil
+	}
 
 	totalPages := int(math.Ceil(float64(totalCount) / float64(auditPageSize)))
 	if totalPages < 1 {
@@ -86,6 +95,7 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		Session: sess,
 		Data: map[string]any{
 			"Entries":     entries,
+			"IDPs":        idps,
 			"CurrentPage": page,
 			"TotalPages":  totalPages,
 			"TotalCount":  totalCount,
