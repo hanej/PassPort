@@ -27,13 +27,14 @@ func newSecTestClient(length int) *Client {
 // Randomness and uniqueness
 // ---------------------------------------------------------------------------
 
-// TestOTP_Randomness calls Initiate 200 times and verifies all generated codes
+// TestOTP_Randomness calls Initiate 100 times and verifies all generated codes
 // are distinct. A collision would indicate non-random or sequential generation.
+// Uses 8 digits (100M possibilities) instead of 6 to minimize birthday paradox collisions.
 func TestOTP_Randomness(t *testing.T) {
-	client := newSecTestClient(6)
-	seen := make(map[string]struct{}, 200)
+	client := newSecTestClient(8)
+	seen := make(map[string]struct{}, 100)
 
-	for i := range 200 {
+	for i := range 100 {
 		_, state, err := client.Initiate(context.Background(), "")
 		if err != nil {
 			t.Fatalf("Initiate failed on iteration %d: %v", i, err)
