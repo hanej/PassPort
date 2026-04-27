@@ -84,11 +84,11 @@ func isLdapCode49WithData(err error, data string) bool {
 }
 
 func isLdapMustChangePassword(err error) bool { return isLdapCode49WithData(err, "773") }
-func isLdapPasswordExpired(err error) bool     { return isLdapCode49WithData(err, "532") }
-func isLdapAccountLocked(err error) bool       { return isLdapCode49WithData(err, "775") }
-func isLdapAccountDisabled(err error) bool     { return isLdapCode49WithData(err, "533") }
-func isLdapAccountExpired(err error) bool      { return isLdapCode49WithData(err, "701") }
-func isLdapInvalidCredentials(err error) bool  { return isLdapCode49WithData(err, "52e") }
+func isLdapPasswordExpired(err error) bool    { return isLdapCode49WithData(err, "532") }
+func isLdapAccountLocked(err error) bool      { return isLdapCode49WithData(err, "775") }
+func isLdapAccountDisabled(err error) bool    { return isLdapCode49WithData(err, "533") }
+func isLdapAccountExpired(err error) bool     { return isLdapCode49WithData(err, "701") }
+func isLdapInvalidCredentials(err error) bool { return isLdapCode49WithData(err, "52e") }
 
 // isLdapPasswordPolicyViolation reports whether a Modify error indicates the new password
 // was rejected by AD policy (complexity, history, or minimum age). AD returns sub-code

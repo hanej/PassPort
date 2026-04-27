@@ -103,9 +103,9 @@ type LocalAdminConfig struct {
 func Defaults() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:         ":8443",
-			TLSCert:      "/etc/passport/tls/cert.pem",
-			TLSKey:       "/etc/passport/tls/key.pem",
+			Addr:         ":8080",
+			TLSCert:      "",
+			TLSKey:       "",
 			DrainTimeout: 15 * time.Second,
 		},
 		Database: DatabaseConfig{
