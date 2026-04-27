@@ -71,7 +71,7 @@ func TestLoadMasterKeyFromEnvURLSafeBase64WithPadding(t *testing.T) {
 
 func TestLoadMasterKeyFromEnvWrongSize(t *testing.T) {
 	t.Setenv(EnvMasterKey, base64.StdEncoding.EncodeToString(make([]byte, 16)))
-	_, err := LoadMasterKey()
+	_, err := loadMasterKeyFrom("/nonexistent/key/path")
 	if err == nil {
 		t.Fatal("expected error for wrong key size")
 	}
@@ -79,7 +79,7 @@ func TestLoadMasterKeyFromEnvWrongSize(t *testing.T) {
 
 func TestLoadMasterKeyFromEnvInvalidBase64(t *testing.T) {
 	t.Setenv(EnvMasterKey, "not-valid-base64!!!")
-	_, err := LoadMasterKey()
+	_, err := loadMasterKeyFrom("/nonexistent/key/path")
 	if err == nil {
 		t.Fatal("expected error for invalid base64")
 	}
@@ -155,7 +155,7 @@ func TestLoadFromFileMissing(t *testing.T) {
 
 func TestLoadMasterKeyNotFound(t *testing.T) {
 	t.Setenv(EnvMasterKey, "")
-	_, err := LoadMasterKey()
+	_, err := loadMasterKeyFrom("/nonexistent/key/path")
 	if err == nil {
 		t.Fatal("expected error when no key source available")
 	}
