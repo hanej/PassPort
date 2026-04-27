@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/ratelimit"
 	"github.com/hanej/passport/web"
 )
@@ -50,7 +51,9 @@ type RouterConfig struct {
 	AdminDocs           *AdminDocsHandler
 	AdminReports        *AdminReportsHandler
 	MFA                 *MFAHandler
+	ADChangePassword    *ADChangePasswordHandler
 	Sessions            *auth.SessionManager
+	Store               db.Store
 	CSRFKey             []byte
 	SecureCookie        bool
 	LoginLimiter        *ratelimit.Limiter
@@ -142,9 +145,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 				r.Get("/reset-password", cfg.ForgotPassword.ShowReset)
 				r.Post("/reset-password", cfg.ForgotPassword.ResetPassword)
 
-				// Force password change page
+				// Force password change page (local admin)
 				r.Get("/change-password", cfg.Bootstrap.ShowChangePassword)
 				r.Post("/change-password", cfg.Bootstrap.ChangePassword)
+
+				// Force password change page (AD users)
+				r.Get("/ad-change-password", cfg.ADChangePassword.ShowChangePassword)
+				r.Post("/ad-change-password", cfg.ADChangePassword.ChangePassword)
 
 				// All other authenticated routes redirect to /change-password
 				// if the session has must_change_password set, and redirect to

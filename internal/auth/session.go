@@ -253,12 +253,17 @@ func (sm *SessionManager) RequireNonResetSession(next http.Handler) http.Handler
 	})
 }
 
-// RequirePasswordChange returns middleware that redirects to /change-password
-// if the session's MustChangePassword flag is true.
+// RequirePasswordChange returns middleware that redirects to the appropriate
+// change-password page if the session's MustChangePassword flag is true.
+// AD provider sessions go to /ad-change-password; local admin sessions go to /change-password.
 func (sm *SessionManager) RequirePasswordChange(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := SessionFromContext(r.Context())
 		if sess != nil && sess.MustChangePassword {
+			if sess.ProviderID != "" {
+				http.Redirect(w, r, "/ad-change-password", http.StatusFound)
+				return
+			}
 			http.Redirect(w, r, "/change-password", http.StatusFound)
 			return
 		}

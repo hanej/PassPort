@@ -73,6 +73,52 @@ func (c *Connector) TestConnection(ctx context.Context) error {
 	return nil
 }
 
+// isLdapCode49WithData reports whether err is LDAP Result Code 49 (invalid credentials)
+// and contains the given hex sub-code in the diagnostic message (e.g. "773", "775").
+func isLdapCode49WithData(err error, data string) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "LDAP Result Code 49") && strings.Contains(msg, "data "+data)
+}
+
+func isLdapMustChangePassword(err error) bool { return isLdapCode49WithData(err, "773") }
+func isLdapPasswordExpired(err error) bool     { return isLdapCode49WithData(err, "532") }
+func isLdapAccountLocked(err error) bool       { return isLdapCode49WithData(err, "775") }
+func isLdapAccountDisabled(err error) bool     { return isLdapCode49WithData(err, "533") }
+func isLdapAccountExpired(err error) bool      { return isLdapCode49WithData(err, "701") }
+func isLdapInvalidCredentials(err error) bool  { return isLdapCode49WithData(err, "52e") }
+
+// isLdapPasswordPolicyViolation reports whether a Modify error indicates the new password
+// was rejected by AD policy (complexity, history, or minimum age). AD returns sub-code
+// 0000052D (ERROR_PASSWORD_RESTRICTION) for all three cases.
+func isLdapPasswordPolicyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "0000052D")
+}
+
+// mapLdapBindError maps known LDAP Result Code 49 sub-codes to sentinel errors.
+// Returns nil if the sub-code is not recognised; the caller wraps the raw error.
+func mapLdapBindError(err error) error {
+	switch {
+	case isLdapMustChangePassword(err):
+		return idp.ErrPasswordMustChange
+	case isLdapPasswordExpired(err):
+		return idp.ErrPasswordExpired
+	case isLdapAccountLocked(err):
+		return idp.ErrAccountLocked
+	case isLdapAccountDisabled(err):
+		return idp.ErrAccountDisabled
+	case isLdapAccountExpired(err):
+		return idp.ErrAccountExpired
+	default:
+		return nil
+	}
+}
+
 // Authenticate verifies user credentials by attempting a bind.
 // The user parameter can be a bare username, UPN (user@domain), or a DN.
 // Bare usernames are resolved to a DN via the service account before binding.
@@ -96,6 +142,9 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 
 	if err := conn.Bind(bindDN, password); err != nil {
 		c.logger.Debug("bind failed during authenticate", "user", user, "bind_dn", bindDN, "error", err)
+		if mapped := mapLdapBindError(err); mapped != nil {
+			return mapped
+		}
 		return fmt.Errorf("authentication failed for %q: %w", user, err)
 	}
 
@@ -104,28 +153,35 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 }
 
 // ChangePassword changes the user's password using the user's own credentials.
-// It resolves the user DN via the service account, then binds as the user and
-// issues a Delete+Add on unicodePwd. This pattern causes AD to enforce the full
-// password policy (complexity, history, minimum age) as a user self-change.
+// When the user's account is in a must-change or expired state, AD rejects the
+// user bind with data 773/532 — but only after validating the password is correct
+// (wrong passwords return data 52e). In that case the change is completed via the
+// service account so the user is not stuck in a loop.
 func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPassword string) error {
 	c.logger.Debug("changing password", "user", user)
 
-	// Resolve the user's DN via service account (search only).
 	userDN, err := c.resolveUserDN(ctx, user)
 	if err != nil {
 		return err
 	}
 
-	// Open a connection and bind as the user.
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connecting to AD: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
 
 	if err := conn.Bind(userDN, oldPassword); err != nil {
+		_ = conn.Close()
+		if isLdapMustChangePassword(err) || isLdapPasswordExpired(err) {
+			// Password is valid; fall through to service account to complete the change.
+			return c.changePasswordAsService(ctx, userDN, newPassword)
+		}
+		if isLdapInvalidCredentials(err) {
+			return fmt.Errorf("current password is incorrect")
+		}
 		return fmt.Errorf("current password verification failed: %w", err)
 	}
+	defer func() { _ = conn.Close() }()
 	c.logger.Debug("user bind successful for password change", "user_dn", userDN)
 
 	// Delete+Add while bound as the user forces AD to apply the full password policy.
@@ -135,10 +191,36 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 	modReq.Add("unicodePwd", []string{string(EncodePassword(newPassword))})
 
 	if err := conn.Modify(modReq); err != nil {
+		if isLdapPasswordPolicyViolation(err) {
+			return idp.ErrPasswordPolicy
+		}
 		return fmt.Errorf("changing password for %q: %w", userDN, err)
 	}
 	c.logger.Debug("password change successful", "user", user)
 	c.logger.Info("password changed", "user", user)
+	return nil
+}
+
+// changePasswordAsService performs a unicodePwd Replace via the service account.
+// Used when the user's bind is rejected due to must-change or expired state.
+func (c *Connector) changePasswordAsService(ctx context.Context, userDN, newPassword string) error {
+	c.logger.Debug("changing password via service account (forced-change state)", "user_dn", userDN)
+	conn, err := c.bindAsService(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	modReq := ldap.NewModifyRequest(userDN, nil)
+	modReq.Replace("unicodePwd", []string{string(EncodePassword(newPassword))})
+
+	if err := conn.Modify(modReq); err != nil {
+		if isLdapPasswordPolicyViolation(err) {
+			return idp.ErrPasswordPolicy
+		}
+		return fmt.Errorf("changing password for %q: %w", userDN, err)
+	}
+	c.logger.Debug("service account password change successful", "user_dn", userDN)
 	return nil
 }
 
