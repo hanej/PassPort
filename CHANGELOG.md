@@ -4,6 +4,25 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.1.4] - 2026-04-27
+
+### Added
+- **Immediate password change for "must change password at next login"** — When AD returns error code 49 with sub-code 773 (user must change password at next logon) or 532 (password expired), the user is now redirected to an immediate password change form instead of seeing a generic error. Previously, users in this state could not change their password.
+- **User-friendly Active Directory error messages** — Specific error conditions from AD bind failures now produce clear, actionable messages:
+  - Account locked (sub-code 775): "Your account is locked. Please contact your IT administrator."
+  - Account disabled (sub-code 533): "Your account is disabled. Please contact your IT administrator."
+  - Account expired (sub-code 701): "Your account has expired. Please contact your IT administrator."
+  - Password expired (sub-code 532): Immediate password change redirect (same as 773)
+  - Invalid credentials and other bind errors retain the generic message for security.
+- **Password complexity hints from AD** — When a password change fails due to AD policy violations, the IDP's configured `password_complexity_hint` is appended to the error message, providing users with guidance on policy requirements.
+
+### Fixed
+- **Server fails to start when TLS is not configured** — The default TLS certificate and key paths were hardcoded in the configuration defaults (`/etc/passport/tls/cert.pem` and `/etc/passport/tls/key.pem`), causing the server to attempt loading non-existent files even when TLS was not explicitly configured in `config.yaml`. TLS is now disabled by default; the server runs on HTTP (`:8080`) and only enables TLS when `tls_cert` and `tls_key` are explicitly set in the config file.
+- **Duplicate flash message on AD password change failures** — The error message was rendered twice: once from the base layout and again in the card template. The duplicate in the card template has been removed.
+- **Password policy error messages not displaying newlines** — When a password change failed due to policy violations, the multi-line error message displayed as a single line with escaped newlines. Flash alerts now use `white-space: pre-wrap` to preserve and wrap newlines while fitting the container width.
+
+---
+
 ## [v1.1.3] - 2026-04-17
 
 ### Fixed
