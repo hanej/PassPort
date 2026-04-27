@@ -42,6 +42,11 @@ const (
 //  1. APP_MASTER_KEY environment variable (base64-encoded 32 bytes)
 //  2. Filesystem path: /etc/passport/key (Linux) or C:\ProgramData\passport\key (Windows)
 func LoadMasterKey() ([]byte, error) {
+	return loadMasterKeyFrom(keyFilePath())
+}
+
+// loadMasterKeyFrom is the testable implementation that accepts a file path.
+func loadMasterKeyFrom(keyPath string) ([]byte, error) {
 	envErr := error(nil)
 	if key, err := loadFromEnv(); err == nil {
 		return key, nil
@@ -50,7 +55,7 @@ func LoadMasterKey() ([]byte, error) {
 		envErr = err
 	}
 
-	if key, err := loadFromFile(keyFilePath()); err == nil {
+	if key, err := loadFromFile(keyPath); err == nil {
 		return key, nil
 	}
 
@@ -61,7 +66,7 @@ func LoadMasterKey() ([]byte, error) {
 
 	return nil, fmt.Errorf(
 		"master key not found: set %s environment variable (base64-encoded 32 bytes) or place raw key at %s",
-		EnvMasterKey, keyFilePath(),
+		EnvMasterKey, keyPath,
 	)
 }
 

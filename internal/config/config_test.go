@@ -10,14 +10,14 @@ import (
 func TestDefaults(t *testing.T) {
 	cfg := Defaults()
 
-	if cfg.Server.Addr != ":8443" {
-		t.Errorf("expected addr :8443, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8080" {
+		t.Errorf("expected addr :8080, got %s", cfg.Server.Addr)
 	}
-	if cfg.Server.TLSCert != "/etc/passport/tls/cert.pem" {
-		t.Errorf("expected tls_cert /etc/passport/tls/cert.pem, got %s", cfg.Server.TLSCert)
+	if cfg.Server.TLSCert != "" {
+		t.Errorf("expected tls_cert empty, got %s", cfg.Server.TLSCert)
 	}
-	if cfg.Server.TLSKey != "/etc/passport/tls/key.pem" {
-		t.Errorf("expected tls_key /etc/passport/tls/key.pem, got %s", cfg.Server.TLSKey)
+	if cfg.Server.TLSKey != "" {
+		t.Errorf("expected tls_key empty, got %s", cfg.Server.TLSKey)
 	}
 	if cfg.Server.DrainTimeout != 15*time.Second {
 		t.Errorf("expected drain_timeout 15s, got %s", cfg.Server.DrainTimeout)
@@ -152,8 +152,8 @@ func TestLoadMissingFileCreatesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Server.Addr != ":8443" {
-		t.Errorf("expected default addr :8443, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8080" {
+		t.Errorf("expected default addr :8080, got %s", cfg.Server.Addr)
 	}
 	// Verify file was created.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -239,14 +239,14 @@ func TestValidationErrors(t *testing.T) {
 
 func TestTLSEnabled(t *testing.T) {
 	cfg := Defaults()
-	if !cfg.TLSEnabled() {
-		t.Error("expected TLS enabled by default")
+	if cfg.TLSEnabled() {
+		t.Error("expected TLS disabled by default")
 	}
 
-	cfg.Server.TLSCert = ""
-	cfg.Server.TLSKey = ""
-	if cfg.TLSEnabled() {
-		t.Error("expected TLS disabled when cert/key cleared")
+	cfg.Server.TLSCert = "/etc/passport/tls/cert.pem"
+	cfg.Server.TLSKey = "/etc/passport/tls/key.pem"
+	if !cfg.TLSEnabled() {
+		t.Error("expected TLS enabled when cert/key set")
 	}
 }
 
@@ -273,10 +273,10 @@ func TestLogLevel(t *testing.T) {
 }
 
 func TestSecureCookies(t *testing.T) {
-	// TLS configured → secure (also true by default).
+	// Neither TLS nor proxy → not secure.
 	cfg := Defaults()
-	if !cfg.SecureCookies() {
-		t.Error("expected SecureCookies true when TLS is configured")
+	if cfg.SecureCookies() {
+		t.Error("expected SecureCookies false when TLS and TrustProxy are not set")
 	}
 
 	// TrustProxy set → secure.
@@ -286,13 +286,13 @@ func TestSecureCookies(t *testing.T) {
 		t.Error("expected SecureCookies true when TrustProxy is set")
 	}
 
-	// Neither TLS nor proxy → not secure.
+	// TLS configured → secure.
 	cfg3 := Defaults()
-	cfg3.Server.TLSCert = ""
-	cfg3.Server.TLSKey = ""
+	cfg3.Server.TLSCert = "/etc/passport/tls/cert.pem"
+	cfg3.Server.TLSKey = "/etc/passport/tls/key.pem"
 	cfg3.Server.TrustProxy = false
-	if cfg3.SecureCookies() {
-		t.Error("expected SecureCookies false when TLS cleared and TrustProxy false")
+	if !cfg3.SecureCookies() {
+		t.Error("expected SecureCookies true when TLS is configured")
 	}
 }
 
@@ -376,8 +376,8 @@ func TestLoadCreatesDefaultFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Server.Addr != ":8443" {
-		t.Errorf("expected default addr :8443, got %s", cfg.Server.Addr)
+	if cfg.Server.Addr != ":8080" {
+		t.Errorf("expected default addr :8080, got %s", cfg.Server.Addr)
 	}
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 		t.Error("expected default config file to be created")

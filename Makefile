@@ -13,7 +13,7 @@ build: ## Build for current platform
 build-all: ## Cross-compile for linux/amd64, linux/arm64, windows/amd64
 	GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build $(GOFLAGS) -o bin/$(BINARY)-linux-amd64 ./cmd/passport
 	GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build $(GOFLAGS) -o bin/$(BINARY)-linux-arm64 ./cmd/passport
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(GOFLAGS) -o bin/$(BINARY)-windows-amd64.exe ./cmd/passport
+#	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build $(GOFLAGS) -o bin/$(BINARY)-windows-amd64.exe ./cmd/passport
 
 ## RPM Packaging
 
