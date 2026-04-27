@@ -13,13 +13,21 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-// Sentinel errors returned by Provider.SearchUser.
+// Sentinel errors returned by Provider implementations.
 var (
 	// ErrNotFound indicates that no matching user was found.
 	ErrNotFound = errors.New("user not found")
 
 	// ErrMultipleMatches indicates that more than one user matched.
 	ErrMultipleMatches = errors.New("multiple users matched")
+
+	// Authentication and account state errors returned by directory connectors.
+	ErrPasswordMustChange = errors.New("user must change password at next logon")
+	ErrPasswordExpired    = errors.New("password has expired")
+	ErrAccountLocked      = errors.New("account is locked out")
+	ErrAccountDisabled    = errors.New("account is disabled")
+	ErrAccountExpired     = errors.New("account has expired")
+	ErrPasswordPolicy     = errors.New("password does not meet policy requirements")
 )
 
 // ProviderType identifies the type of identity provider.
