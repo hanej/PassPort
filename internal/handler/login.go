@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -173,14 +174,47 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 	)
 
 	if err := provider.Authenticate(r.Context(), username, password); err != nil {
-		h.logger.Debug("authentication failed",
-			"provider_id", providerID,
-			"username", username,
-			"error", err,
-		)
-		h.auditLoginFailure(r, providerID, username, fmt.Sprintf("authentication failed: %v", err))
-		h.renderLoginError(w, r, "Invalid username or password")
-		return
+		switch {
+		case errors.Is(err, idp.ErrPasswordMustChange), errors.Is(err, idp.ErrPasswordExpired):
+			h.logger.Debug("user requires password change",
+				"provider_id", providerID,
+				"username", username,
+			)
+			isAdmin := h.checkAdminGroupMembership(r.Context(), provider, providerID, username)
+			if _, sessErr := h.sessions.CreateSession(w, r, "provider", providerID, username, isAdmin, true); sessErr != nil {
+				h.logger.Error("failed to create must-change-password session", "error", sessErr)
+				h.renderer.RenderError(w, r, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			h.auditLoginFailure(r, providerID, username, "password change required")
+			http.Redirect(w, r, "/ad-change-password", http.StatusFound)
+			return
+
+		case errors.Is(err, idp.ErrAccountLocked):
+			h.auditLoginFailure(r, providerID, username, "account locked")
+			h.renderLoginError(w, r, "Your account is locked. Please contact your IT administrator.")
+			return
+
+		case errors.Is(err, idp.ErrAccountDisabled):
+			h.auditLoginFailure(r, providerID, username, "account disabled")
+			h.renderLoginError(w, r, "Your account is disabled. Please contact your IT administrator.")
+			return
+
+		case errors.Is(err, idp.ErrAccountExpired):
+			h.auditLoginFailure(r, providerID, username, "account expired")
+			h.renderLoginError(w, r, "Your account has expired. Please contact your IT administrator.")
+			return
+
+		default:
+			h.logger.Debug("authentication failed",
+				"provider_id", providerID,
+				"username", username,
+				"error", err,
+			)
+			h.auditLoginFailure(r, providerID, username, fmt.Sprintf("authentication failed: %v", err))
+			h.renderLoginError(w, r, "Invalid username or password")
+			return
+		}
 	}
 
 	h.logger.Debug("authentication successful, checking admin group membership",

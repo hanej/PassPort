@@ -358,6 +358,7 @@ func main() {
 	adminMFAHandler := handler.NewAdminMFAHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	mfaHandler := handler.NewMFAHandler(database, sessions, cryptoSvc, registry, renderer, auditLogger, logger)
 	forgotPasswordHandler := handler.NewForgotPasswordHandler(database, registry, sessions, renderer, auditLogger, logger)
+	adChangePasswordHandler := handler.NewADChangePasswordHandler(sessions, renderer, auditLogger, logger, registry, database)
 
 	adminSMTPHandler := handler.NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	adminEmailTemplatesHandler := handler.NewAdminEmailTemplatesHandler(database, renderer, sessions, auditLogger, logger)
@@ -398,7 +399,9 @@ func main() {
 		AdminMFA:            adminMFAHandler,
 		AdminExpiration:     adminExpirationHandler,
 		MFA:                 mfaHandler,
+		ADChangePassword:    adChangePasswordHandler,
 		Sessions:            sessions,
+		Store:               database,
 		CSRFKey:             csrfKey,
 		SecureCookie:        cfg.SecureCookies(),
 		LoginLimiter:        loginLimiter,
