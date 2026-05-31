@@ -307,6 +307,57 @@ func TestRunForIDP_DisabledConfig(t *testing.T) {
 	}
 }
 
+func TestRunForIDPManual_DisabledConfigProceeds(t *testing.T) {
+	database := openTestDB(t)
+	registry := idp.NewRegistry(testLogger())
+	cryptoSvc := newCryptoService(t)
+	al := newAuditLogger(t, database)
+	n := New(database, registry, cryptoSvc, al, testLogger())
+
+	testCreateIDP(t, database, "corp-ad")
+
+	if err := database.SaveExpirationConfig(context.Background(), &db.ExpirationConfig{
+		IDPID:                "corp-ad",
+		Enabled:              false,
+		CronSchedule:         "0 * * * *",
+		DaysBeforeExpiration: 14,
+	}); err != nil {
+		t.Fatalf("saving expiration config: %v", err)
+	}
+
+	// RunForIDPManual should not fail due to disabled config —
+	// it should proceed past the enabled check and fail on SMTP (next step).
+	_, err := n.RunForIDPManual(context.Background(), "corp-ad")
+	if err == nil {
+		t.Fatal("expected an error (SMTP not configured), got nil")
+	}
+	if strings.Contains(err.Error(), "disabled") {
+		t.Errorf("RunForIDPManual should bypass disabled check, but got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "SMTP") {
+		t.Errorf("expected SMTP error (next step after config check), got: %v", err)
+	}
+}
+
+func TestRunForIDPManual_NoConfig(t *testing.T) {
+	database := openTestDB(t)
+	registry := idp.NewRegistry(testLogger())
+	cryptoSvc := newCryptoService(t)
+	al := newAuditLogger(t, database)
+	n := New(database, registry, cryptoSvc, al, testLogger())
+
+	testCreateIDP(t, database, "corp-ad")
+
+	// No expiration config saved at all — RunForIDPManual should still fail.
+	_, err := n.RunForIDPManual(context.Background(), "corp-ad")
+	if err == nil {
+		t.Fatal("expected error for missing config")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got: %v", err)
+	}
+}
+
 func TestRunForIDP_NoSMTP(t *testing.T) {
 	database := openTestDB(t)
 	registry := idp.NewRegistry(testLogger())

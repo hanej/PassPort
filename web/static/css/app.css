@@ -199,6 +199,13 @@ main {
 
 .flash-message {
     transition: opacity 0.5s ease;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
+.flash-message .btn-close {
+    top: 50%;
+    transform: translateY(-50%);
 }
 
 .flash-message.fade-out {

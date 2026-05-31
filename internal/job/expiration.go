@@ -133,12 +133,25 @@ func (n *PasswordExpirationNotifier) loadSchedules(ctx context.Context) {
 // RunForIDP scans a single IDP's directory for expiring passwords and sends notifications.
 // Returns the number of notification emails sent.
 func (n *PasswordExpirationNotifier) RunForIDP(ctx context.Context, idpID string) (int, error) {
-	n.logger.Info("starting expiration scan", "idp_id", idpID)
+	return n.runForIDP(ctx, idpID, false)
+}
+
+// RunForIDPManual is like RunForIDP but skips the "enabled" check, allowing
+// administrators to trigger a scan on-demand even if the scheduled cron is disabled.
+func (n *PasswordExpirationNotifier) RunForIDPManual(ctx context.Context, idpID string) (int, error) {
+	return n.runForIDP(ctx, idpID, true)
+}
+
+func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string, manual bool) (int, error) {
+	n.logger.Info("starting expiration scan", "idp_id", idpID, "manual", manual)
 
 	// 1. Load expiration config
 	cfg, err := n.store.GetExpirationConfig(ctx, idpID)
-	if err != nil || cfg == nil || !cfg.Enabled {
-		return 0, fmt.Errorf("expiration config not found or disabled for %s", idpID)
+	if err != nil || cfg == nil {
+		return 0, fmt.Errorf("expiration config not found for %s — configure it under Admin > Identity Providers > Expiration", idpID)
+	}
+	if !cfg.Enabled && !manual {
+		return 0, fmt.Errorf("expiration config is disabled for %s", idpID)
 	}
 
 	// 2. Load IDP record

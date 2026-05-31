@@ -731,6 +731,52 @@ func TestShowDashboard_InvalidConfigJSON(t *testing.T) {
 	}
 }
 
+// TestShowDashboard_CrossProviderMapping verifies that when a user authenticates
+// via one provider (e.g. corp-ad) but their mapping was created by a different
+// provider (e.g. redhat-idm), the dashboard still shows the mapping as linked.
+func TestShowDashboard_CrossProviderMapping(t *testing.T) {
+	env := setupDashboardTest(t)
+	ctx := context.Background()
+
+	// Create two IDPs.
+	for _, rec := range []db.IdentityProviderRecord{
+		{ID: "redhat-idm", FriendlyName: "Red Hat IDM", ProviderType: "freeipa", Enabled: true, ConfigJSON: `{}`},
+		{ID: "corp-ad", FriendlyName: "Corp AD", ProviderType: "ad", Enabled: true, ConfigJSON: `{}`},
+	} {
+		if err := env.db.CreateIDP(ctx, &rec); err != nil {
+			t.Fatalf("creating IDP: %v", err)
+		}
+	}
+
+	// Mapping was created when user logged in via redhat-idm (auth_provider_id = "redhat-idm").
+	now := time.Now().UTC()
+	if err := env.db.UpsertMapping(ctx, &db.UserIDPMapping{
+		AuthProviderID:  "redhat-idm",
+		AuthUsername:    "jdoe",
+		TargetIDPID:     "corp-ad",
+		TargetAccountDN: "CN=John Doe,DC=example,DC=com",
+		LinkType:        "auto",
+		LinkedAt:        now,
+		VerifiedAt:      &now,
+	}); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+
+	// User now logs in via corp-ad — session has provider_id = "corp-ad".
+	cookies := env.createSessionWithCookies(t, "provider", "corp-ad", "jdoe", false)
+	rec := env.serveWithSession(t, env.handler.ShowDashboard, http.MethodGet, "/dashboard", cookies, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// The dashboard template should show Corp AD panel (which has the mapping).
+	body := rec.Body.String()
+	if !strings.Contains(body, "Corp AD") {
+		t.Errorf("expected 'Corp AD' in response, got: %s", body)
+	}
+}
+
 // TestShowDashboard_WithMappingAndWarning covers lines 102-103 (mappings loop),
 // 112-113 (warnings loop), and 139-152 (attribute lookup for linked accounts).
 func TestShowDashboard_WithMappingAndWarning(t *testing.T) {

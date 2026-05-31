@@ -4,6 +4,24 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.1.5] - 2026-05-31
+
+### Added
+- **On-demand password expiration scan** — The "Run Now" button no longer requires the cron schedule to be enabled. Admins can trigger a manual expiration scan even when the scheduled job is turned off, as long as the expiration config exists.
+
+### Fixed
+- **Dashboard shows accounts as unlinked when logging in via a different provider** — The dashboard queried mappings filtered by the current auth provider, but mappings are created by whichever provider the user first logged in with. The dashboard now retrieves mappings by username regardless of which provider created them, consistent with how the correlation engine determines linkage.
+- **Flash notification bubble too tall** — The `white-space: pre-wrap` style was applied to the entire alert container, causing template indentation whitespace to render as visible space. Moved `pre-wrap` to a span wrapping only the message text and tightened vertical padding.
+
+### Improved
+- **Duo MFA Redirect URI help text** — The admin form and documentation now explicitly state that the path must be `/mfa/callback` (hardcoded in the application) to prevent misconfiguration.
+
+### Security
+- **Go toolchain updated to 1.26.3** — Fixes 6 standard library vulnerabilities including XSS in `html/template` and DoS in `net/mail`.
+- **Updated `github.com/Azure/go-ntlmssp` to v0.1.1** — Fixes a panic on malformed NTLM challenge payloads (integer overflow/wraparound).
+
+---
+
 ## [v1.1.4] - 2026-04-27
 
 ### Added

@@ -534,7 +534,7 @@ PassPort integrates with Duo using the Duo Universal Prompt (OIDC-based).
 2. Navigate to **Applications > Protect an Application**
 3. Search for **Web SDK** and click **Protect**
 4. Note the **Client ID**, **Client Secret**, and **API Hostname**
-5. Set the **Redirect URI** to `https://your-passport-host/mfa/callback`
+5. Set the **Redirect URI** to `https://your-passport-host/mfa/callback` — the path `/mfa/callback` is required and fixed; only replace the hostname
 
 #### Configuring a Duo Provider
 
@@ -546,7 +546,7 @@ Navigate to **Admin > MFA > Add New** and select **Duo**:
 | API Hostname | Duo API hostname (e.g., `api-XXXXXXXX.duosecurity.com`) |
 | Client ID | Duo application Client ID |
 | Client Secret | Duo application Client Secret (encrypted at rest) |
-| Redirect URI | Must match what is configured in Duo (e.g., `https://passport.example.com/mfa/callback`) |
+| Redirect URI | Your PassPort hostname followed by the fixed path `/mfa/callback` (e.g., `https://passport.example.com/mfa/callback`). The path must be exactly `/mfa/callback` — this is hardcoded in the application. Must match exactly what is set in the Duo Admin Panel. |
 
 Use the **Test Connection** button to verify the credentials against the Duo API before saving.
 

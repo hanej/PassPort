@@ -80,7 +80,10 @@
                     <input type="text" class="form-control" id="mfa_redirect_uri" name="redirect_uri"
                            value="{{if eq .Data.Mode "edit"}}{{.Data.Config.RedirectURI}}{{end}}"
                            placeholder="https://passport.example.com/mfa/callback">
-                    <div class="form-text">The callback URL configured in your Duo application. Must match exactly.</div>
+                    <div class="form-text">
+                        The callback URL registered in your Duo application. The path <strong>must</strong> be <code>/mfa/callback</code>
+                        (e.g. <code>https://passport.example.com/mfa/callback</code>). This value must match exactly what is configured in the Duo Admin Panel.
+                    </div>
                 </div>
             </div>
         </div>

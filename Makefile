@@ -2,8 +2,9 @@ MODULE   := github.com/hanej/passport
 BINARY   := passport
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
 GOFLAGS  := -trimpath -ldflags="-s -w -X main.version=$(VERSION)"
+GOBIN    := $(shell go env GOPATH | cut -d: -f1)/bin
 
-.PHONY: build build-all run test test-coverage test-integration test-e2e lint fmt vet docker rpm-amd64 rpm-arm64 clean help
+.PHONY: build build-all run test test-coverage test-integration test-e2e lint fmt vet check docker rpm-amd64 rpm-arm64 clean help
 
 ## Build
 
@@ -53,6 +54,17 @@ test-e2e: ## Run end-to-end tests
 	CGO_ENABLED=0 go test ./... -tags=e2e -count=1 -timeout=120s
 
 ## Code Quality
+
+check: ## Run all pre-push checks (lint, vet, fmt, vuln scan)
+	@echo "=== fmt ==="
+	@test -z "$$(gofmt -l . | tee /dev/stderr)" || (echo "FAIL: files need formatting" && exit 1)
+	@echo "=== vet ==="
+	go vet ./...
+	@echo "=== lint ==="
+	golangci-lint run ./...
+	@echo "=== vuln ==="
+	$(GOBIN)/govulncheck ./...
+	@echo "All checks passed."
 
 lint: ## Run golangci-lint
 	golangci-lint run ./...

@@ -80,13 +80,11 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 	)
 
 	// Load the user's mappings from all IDPs.
+	// Use empty authProviderID to retrieve mappings regardless of which provider
+	// originally created them — consistent with how correlation determines linkage.
 	var mappings []db.UserIDPMapping
 	if sess.ProviderID != "" || sess.UserType == "local" {
-		authProvider := sess.ProviderID
-		if sess.UserType == "local" {
-			authProvider = "local"
-		}
-		mappings, err = h.store.ListMappings(r.Context(), authProvider, sess.Username)
+		mappings, err = h.store.ListMappings(r.Context(), "", sess.Username)
 		if err != nil {
 			h.logger.Error("failed to list user mappings", "error", err)
 		}

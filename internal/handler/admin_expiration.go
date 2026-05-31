@@ -254,7 +254,7 @@ func (h *AdminExpirationHandler) RunNow(w http.ResponseWriter, r *http.Request) 
 
 	h.logger.Debug("running expiration scan now", "idp_id", idpID)
 
-	count, err := h.notifier.RunForIDP(r.Context(), idpID)
+	count, err := h.notifier.RunForIDPManual(r.Context(), idpID)
 	if err != nil {
 		h.logger.Error("run now failed", "error", err, "idp_id", idpID)
 		h.renderer.JSON(w, http.StatusOK, map[string]any{
