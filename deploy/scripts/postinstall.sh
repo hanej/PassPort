@@ -47,3 +47,4 @@ chown passport:passport "${TLS_DIR}"
 
 systemctl daemon-reload
 systemctl enable passport
+systemctl restart passport

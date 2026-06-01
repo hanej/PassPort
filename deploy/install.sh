@@ -65,6 +65,9 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${CONF_DIR}"
 echo "Installing systemd service..."
 cp deploy/passport.service /etc/systemd/system/passport.service
 systemctl daemon-reload
+echo "Starting systemd service..."
+systemctl enable passport
+systemctl restart passport
 
 echo ""
 echo "=== Installation Complete ==="
