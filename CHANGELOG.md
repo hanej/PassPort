@@ -4,6 +4,19 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.1.6] - 2026-06-01
+
+### Added
+- **Expired password notifications** — A new "Days After Expiration" setting under Password Expiration Notifications configures how long to keep sending notification emails to accounts whose passwords have already expired. Accepts `0` (disabled), `-1` (indefinitely), or a positive integer (number of days after expiration). Requires database migration 004.
+- **`password_expired` email template** — A new global template type with variables `Username`, `ProviderName`, `ExpirationDate`, and `DaysExpired`. Per-IDP overrides follow the same `password_expired:{idpID}` key pattern as the existing warning template.
+- **Dry-run "Already Expired" tab** — The Test Filters modal now shows two Bootstrap nav-tabs: "Expiring Soon" (existing behavior) and "Already Expired" (users whose passwords have already passed their expiration date), populated in a single scan.
+
+### Fixed
+- **`bufio.Scanner` missing `Err()` check in audit logger test** — The scan loop did not inspect `scanner.Err()` after completion, which could mask I/O errors.
+- **Email template preview missing sample data for report and expired templates** — The preview handler did not populate `GeneratedDate`, `AccountCount`, or `ReportTable` for report-type templates, nor `DaysExpired` or `TempPassword` for their respective template types. All sample data variables are now present so every template type renders correctly in the preview modal.
+
+---
+
 ## [v1.1.5] - 2026-05-31
 
 ### Added

@@ -409,7 +409,12 @@ func (h *AdminEmailTemplatesHandler) Preview(w http.ResponseWriter, r *http.Requ
 		"IPAddress":      "192.168.1.100",
 		"ExpirationDate": time.Now().Local().Add(7 * 24 * time.Hour).Format("Jan 2, 2006"),
 		"DaysRemaining":  "7",
+		"DaysExpired":    "3",
+		"TempPassword":   "Temp@1234!",
 		"Reason":         "Too many failed login attempts",
+		"GeneratedDate":  time.Now().Local().Format("Jan 2, 2006 3:04 PM MST"),
+		"AccountCount":   "12",
+		"ReportTable":    "<em>(report table rendered here)</em>",
 	}
 
 	renderedHTML, err := executeTemplate(req.BodyHTML, sampleData)
