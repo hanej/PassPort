@@ -23,6 +23,13 @@ import (
 
 // PasswordExpirationNotifier scans LDAP directories for users with expiring
 // passwords and sends notification emails on a cron schedule.
+
+// compiledFilter is a pre-compiled exclusion filter used during notification scans.
+type compiledFilter struct {
+	attribute   string
+	regex       *regexp.Regexp
+	description string
+}
 type PasswordExpirationNotifier struct {
 	store     db.Store
 	registry  *idp.Registry
@@ -207,10 +214,6 @@ func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string
 	}
 
 	// Pre-compile regexes
-	type compiledFilter struct {
-		attribute string
-		regex     *regexp.Regexp
-	}
 	var compiled []compiledFilter
 	for _, f := range filters {
 		re, err := regexp.Compile(f.Pattern)
@@ -334,6 +337,143 @@ func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string
 	}
 
 	n.logger.Info("expiration scan complete", "idp_id", idpID, "total_users", len(users), "notifications_sent", sent)
+
+	// 9. Send expired account notifications if configured
+	if cfg.DaysAfterExpiration != 0 {
+		expiredSent, err := n.sendExpiredNotifications(ctx, idpID, cfg, record, idpConfig, emailCfg, compiled, conn)
+		if err != nil {
+			n.logger.Error("expired notifications failed", "idp_id", idpID, "error", err)
+		} else {
+			sent += expiredSent
+		}
+	}
+
+	return sent, nil
+}
+
+// sendExpiredNotifications sends emails to users whose passwords have already expired.
+func (n *PasswordExpirationNotifier) sendExpiredNotifications(
+	ctx context.Context,
+	idpID string,
+	cfg *db.ExpirationConfig,
+	record *db.IdentityProviderRecord,
+	idpConfig idp.Config,
+	emailCfg email.Config,
+	compiled []compiledFilter,
+	conn idp.LDAPConn,
+) (int, error) {
+	// Load expired email template — check for IDP-specific first, fall back to global.
+	tmpl, err := n.store.GetEmailTemplate(ctx, "password_expired:"+idpID)
+	if err != nil || tmpl == nil {
+		tmpl, err = n.store.GetEmailTemplate(ctx, "password_expired")
+		if err != nil || tmpl == nil {
+			return 0, fmt.Errorf("password_expired email template not found")
+		}
+		n.logger.Debug("using global password_expired template", "idp_id", idpID)
+	} else {
+		n.logger.Debug("using IDP-specific password_expired template", "idp_id", idpID)
+	}
+
+	emailAttr := idpConfig.NotificationEmailAttr
+	if emailAttr == "" {
+		emailAttr = "mail"
+	}
+
+	var expiredUsers []ExpiringUser
+	switch idp.ProviderType(record.ProviderType) {
+	case idp.ProviderTypeAD:
+		maxPwdAge, err := getADMaxPwdAge(conn, idpConfig.BaseDN)
+		if err != nil {
+			return 0, fmt.Errorf("getting AD maxPwdAge: %w", err)
+		}
+		expiredUsers, err = searchADExpiredUsers(conn, idpConfig.BaseDN, idpConfig.UserSearchBase, emailAttr, maxPwdAge, cfg.DaysAfterExpiration)
+		if err != nil {
+			return 0, fmt.Errorf("searching AD expired users: %w", err)
+		}
+	case idp.ProviderTypeFreeIPA:
+		expiredUsers, err = searchFreeIPAExpiredUsers(conn, idpConfig.BaseDN, idpConfig.UserSearchBase, emailAttr, cfg.DaysAfterExpiration)
+		if err != nil {
+			return 0, fmt.Errorf("searching FreeIPA expired users: %w", err)
+		}
+	default:
+		return 0, fmt.Errorf("unsupported provider type: %s", record.ProviderType)
+	}
+
+	n.logger.Info("found users with expired passwords", "idp_id", idpID, "count", len(expiredUsers))
+
+	sent := 0
+	for _, user := range expiredUsers {
+		// Apply exclusion filters
+		excluded := false
+		for _, cf := range compiled {
+			attrVal := ""
+			if cf.attribute == "dn" || cf.attribute == "distinguishedName" {
+				attrVal = user.DN
+			} else {
+				val, err := readUserAttribute(conn, user.DN, cf.attribute)
+				if err != nil {
+					n.logger.Debug("could not read filter attribute", "dn", user.DN, "attribute", cf.attribute, "error", err)
+					continue
+				}
+				attrVal = val
+			}
+			if cf.regex.MatchString(attrVal) {
+				n.logger.Debug("expired user excluded by filter", "username", user.Username, "attribute", cf.attribute, "pattern", cf.regex.String())
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		if user.Email == "" {
+			n.logger.Debug("expired user has no email, skipping", "username", user.Username)
+			continue
+		}
+
+		// DaysRemaining is negative for expired users; DaysExpired is the positive form
+		daysExpired := -user.DaysRemaining
+		if daysExpired < 0 {
+			daysExpired = 0
+		}
+
+		data := map[string]string{
+			"Username":       user.Username,
+			"ProviderName":   record.FriendlyName,
+			"ExpirationDate": user.ExpirationDate.Local().Format("Jan 2, 2006 3:04 PM MST"),
+			"DaysExpired":    fmt.Sprintf("%d", daysExpired),
+		}
+
+		renderedBody, err := executeTemplate(tmpl.BodyHTML, data)
+		if err != nil {
+			n.logger.Warn("failed to render expired email body", "username", user.Username, "error", err)
+			continue
+		}
+		renderedSubject, err := executeTemplate(tmpl.Subject, data)
+		if err != nil {
+			n.logger.Warn("failed to render expired email subject", "username", user.Username, "error", err)
+			continue
+		}
+
+		if err := email.SendHTML(emailCfg, user.Email, renderedSubject, renderedBody); err != nil {
+			n.logger.Warn("failed to send expired notification", "username", user.Username, "email", user.Email, "error", err)
+			continue
+		}
+
+		n.audit.Log(ctx, &db.AuditEntry{
+			Timestamp:  time.Now().UTC(),
+			Username:   user.Username,
+			SourceIP:   "system",
+			Action:     audit.ActionExpiredNotification,
+			ProviderID: idpID,
+			Result:     audit.ResultSuccess,
+			Details:    fmt.Sprintf("Password expired notification sent to %s (expired %s, %d days ago)", user.Email, user.ExpirationDate.Local().Format("2006-01-02"), daysExpired),
+		})
+		sent++
+	}
+
+	n.logger.Info("expired notifications complete", "idp_id", idpID, "total_expired", len(expiredUsers), "notifications_sent", sent)
 	return sent, nil
 }
 
@@ -355,6 +495,11 @@ type DryRunResult struct {
 	ExcludedCount int                `json:"excluded_count"`
 	EligibleCount int                `json:"eligible_count"`
 	Users         []DryRunUserResult `json:"users"`
+	// Expired account fields (populated when DaysAfterExpiration != 0)
+	ExpiredTotal         int                `json:"expired_total"`
+	ExpiredExcludedCount int                `json:"expired_excluded_count"`
+	ExpiredEligibleCount int                `json:"expired_eligible_count"`
+	ExpiredUsers         []DryRunUserResult `json:"expired_users"`
 }
 
 // DryRunForIDP scans for expiring passwords and evaluates exclusion filters
@@ -399,11 +544,6 @@ func (n *PasswordExpirationNotifier) DryRunForIDP(ctx context.Context, idpID str
 		return nil, fmt.Errorf("loading exclusion filters: %w", err)
 	}
 
-	type compiledFilter struct {
-		attribute   string
-		regex       *regexp.Regexp
-		description string
-	}
 	var compiled []compiledFilter
 	for _, f := range filters {
 		re, err := regexp.Compile(f.Pattern)
@@ -498,6 +638,66 @@ func (n *PasswordExpirationNotifier) DryRunForIDP(ctx context.Context, idpID str
 	}
 
 	n.logger.Info("dry run complete", "idp_id", idpID, "total", result.TotalUsers, "excluded", result.ExcludedCount, "eligible", result.EligibleCount)
+
+	// Also scan for expired users if DaysAfterExpiration is configured.
+	if cfg.DaysAfterExpiration != 0 {
+		var expiredUsers []ExpiringUser
+		switch idp.ProviderType(record.ProviderType) {
+		case idp.ProviderTypeAD:
+			maxPwdAge, err := getADMaxPwdAge(conn, idpConfig.BaseDN)
+			if err == nil {
+				expiredUsers, _ = searchADExpiredUsers(conn, idpConfig.BaseDN, idpConfig.UserSearchBase, emailAttr, maxPwdAge, cfg.DaysAfterExpiration)
+			}
+		case idp.ProviderTypeFreeIPA:
+			expiredUsers, _ = searchFreeIPAExpiredUsers(conn, idpConfig.BaseDN, idpConfig.UserSearchBase, emailAttr, cfg.DaysAfterExpiration)
+		}
+
+		result.ExpiredTotal = len(expiredUsers)
+		result.ExpiredUsers = make([]DryRunUserResult, 0, len(expiredUsers))
+
+		for _, user := range expiredUsers {
+			daysExpired := -user.DaysRemaining
+			if daysExpired < 0 {
+				daysExpired = 0
+			}
+			ur := DryRunUserResult{
+				Username:        user.Username,
+				DN:              user.DN,
+				Email:           user.Email,
+				ExpirationDate:  user.ExpirationDate.Local().Format("Jan 2, 2006 3:04 PM MST"),
+				ExpirationEpoch: user.ExpirationDate.Unix(),
+				DaysRemaining:   daysExpired, // For expired users, this represents days since expiration (positive)
+			}
+
+			for _, cf := range compiled {
+				attrVal := ""
+				if cf.attribute == "dn" || cf.attribute == "distinguishedName" {
+					attrVal = user.DN
+				} else {
+					val, err := readUserAttribute(conn, user.DN, cf.attribute)
+					if err != nil {
+						continue
+					}
+					attrVal = val
+				}
+				if cf.regex.MatchString(attrVal) {
+					ur.Excluded = true
+					ur.FilterMatch = cf.description
+					break
+				}
+			}
+
+			if ur.Excluded {
+				result.ExpiredExcludedCount++
+			} else {
+				result.ExpiredEligibleCount++
+			}
+			result.ExpiredUsers = append(result.ExpiredUsers, ur)
+		}
+
+		n.logger.Info("dry run expired scan complete", "idp_id", idpID, "expired_total", result.ExpiredTotal, "expired_excluded", result.ExpiredExcludedCount, "expired_eligible", result.ExpiredEligibleCount)
+	}
+
 	return result, nil
 }
 

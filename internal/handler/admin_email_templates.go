@@ -24,6 +24,7 @@ var templateVariables = map[string][]string{
 	"password_changed":        {"Username", "ProviderName", "Timestamp", "IPAddress"},
 	"password_reset":          {"Username", "ProviderName", "Timestamp"},
 	"password_expiration":     {"Username", "ProviderName", "ExpirationDate", "DaysRemaining"},
+	"password_expired":        {"Username", "ProviderName", "ExpirationDate", "DaysExpired"},
 	"account_locked":          {"Username", "ProviderName", "Timestamp", "Reason"},
 	"account_unlocked":        {"Username", "ProviderName", "Timestamp"},
 	"expiration_report":       {"ProviderName", "GeneratedDate", "AccountCount", "ReportTable"},
@@ -37,6 +38,7 @@ var templateNames = map[string]string{
 	"password_changed":        "Password Changed",
 	"password_reset":          "Password Reset",
 	"password_expiration":     "Password Expiration Warning (Default)",
+	"password_expired":        "Password Expired Notice (Default)",
 	"account_locked":          "Account Locked",
 	"account_unlocked":        "Account Unlocked",
 	"expiration_report":       "Soon-to-Expire Passwords Report (Default)",
@@ -46,6 +48,11 @@ var templateNames = map[string]string{
 // IsPasswordExpirationTemplate returns true for both the global and per-IDP expiration templates.
 func IsPasswordExpirationTemplate(templateType string) bool {
 	return templateType == "password_expiration" || strings.HasPrefix(templateType, "password_expiration:")
+}
+
+// IsPasswordExpiredTemplate returns true for both the global and per-IDP expired templates.
+func IsPasswordExpiredTemplate(templateType string) bool {
+	return templateType == "password_expired" || strings.HasPrefix(templateType, "password_expired:")
 }
 
 // IsReportTemplate returns true for global and per-IDP report templates.
@@ -106,6 +113,10 @@ var defaultTemplates = map[string]struct {
 		Subject:  "Expired Accounts - {{.ProviderName}}",
 		BodyHTML: `<h2>Expired Accounts</h2><p><strong>Provider:</strong> {{.ProviderName}}</p><p><strong>Generated:</strong> {{.GeneratedDate}}</p><p><strong>Accounts:</strong> {{.AccountCount}}</p>{{.ReportTable}}<p>&nbsp;</p><p>This report was generated automatically by PassPort.</p>`,
 	},
+	"password_expired": {
+		Subject:  "Your password has expired",
+		BodyHTML: `<h2>Password Expired</h2><p>Hello {{.Username}},</p><p>Your password for <strong>{{.ProviderName}}</strong> expired on <strong>{{.ExpirationDate}}</strong> ({{.DaysExpired}} days ago).</p><p>Please change your password immediately to restore access to your account.</p><p>— PassPort</p>`,
+	},
 }
 
 // AdminEmailTemplatesHandler handles email template management in the admin UI.
@@ -162,6 +173,10 @@ func (h *AdminEmailTemplatesHandler) List(w http.ResponseWriter, r *http.Request
 			idpID := strings.TrimPrefix(t.TemplateType, "password_expiration:")
 			name = "Password Expiration Warning — " + idpID
 		}
+		if name == "" && IsPasswordExpiredTemplate(t.TemplateType) {
+			idpID := strings.TrimPrefix(t.TemplateType, "password_expired:")
+			name = "Password Expired Notice — " + idpID
+		}
 		if name == "" {
 			if base := reportTemplateBase(t.TemplateType); base != "" {
 				idpID := strings.TrimPrefix(t.TemplateType, base+":")
@@ -200,13 +215,17 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 	sess := auth.SessionFromContext(r.Context())
 
 	// Validate type: either in the global list, a per-IDP password_expiration template,
-	// or a per-IDP report template.
+	// a per-IDP password_expired template, or a per-IDP report template.
 	vars, ok := templateVariables[templateType]
 	friendlyName := templateNames[templateType]
 	if !ok && IsPasswordExpirationTemplate(templateType) {
 		vars = templateVariables["password_expiration"]
 		idpID := strings.TrimPrefix(templateType, "password_expiration:")
 		friendlyName = "Password Expiration Warning — " + idpID
+	} else if !ok && IsPasswordExpiredTemplate(templateType) {
+		vars = templateVariables["password_expired"]
+		idpID := strings.TrimPrefix(templateType, "password_expired:")
+		friendlyName = "Password Expired Notice — " + idpID
 	} else if !ok {
 		if base := reportTemplateBase(templateType); base != "" {
 			vars = templateVariables[base]
@@ -224,6 +243,12 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 		// For per-IDP templates that don't exist yet, start with the global default.
 		if IsPasswordExpirationTemplate(templateType) && templateType != "password_expiration" {
 			globalTmpl, globalErr := h.store.GetEmailTemplate(r.Context(), "password_expiration")
+			if globalErr == nil {
+				tmpl = globalTmpl
+				tmpl.TemplateType = templateType
+			}
+		} else if IsPasswordExpiredTemplate(templateType) && templateType != "password_expired" {
+			globalTmpl, globalErr := h.store.GetEmailTemplate(r.Context(), "password_expired")
 			if globalErr == nil {
 				tmpl = globalTmpl
 				tmpl.TemplateType = templateType
@@ -269,8 +294,8 @@ func (h *AdminEmailTemplatesHandler) Save(w http.ResponseWriter, r *http.Request
 	sess := auth.SessionFromContext(r.Context())
 
 	// Validate type: either in the global list, a per-IDP password_expiration template,
-	// or a per-IDP report template.
-	if _, ok := templateVariables[templateType]; !ok && !IsPasswordExpirationTemplate(templateType) && !IsReportTemplate(templateType) {
+	// a per-IDP password_expired template, or a per-IDP report template.
+	if _, ok := templateVariables[templateType]; !ok && !IsPasswordExpirationTemplate(templateType) && !IsPasswordExpiredTemplate(templateType) && !IsReportTemplate(templateType) {
 		h.logger.Debug("invalid template type on save", "type", templateType)
 		h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
 		return

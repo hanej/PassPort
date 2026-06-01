@@ -188,3 +188,124 @@ func searchFreeIPAExpiringUsers(conn idp.LDAPConn, baseDN, userSearchBase, email
 	}
 	return users, nil
 }
+
+// searchADExpiredUsers searches AD for users with passwords that have already expired.
+// daysAfterExpiration controls how far back to look: -1 means no limit (all expired),
+// positive value means only include users expired within that many days.
+func searchADExpiredUsers(conn idp.LDAPConn, baseDN, userSearchBase, emailAttr string, maxPwdAge time.Duration, daysAfterExpiration int) ([]ExpiringUser, error) {
+	if userSearchBase == "" {
+		userSearchBase = baseDN
+	}
+	now := time.Now()
+
+	// Search for enabled user accounts with a password set
+	filter := "(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(pwdLastSet>=1))"
+	attrs := []string{"dn", "sAMAccountName", "pwdLastSet"}
+	if emailAttr != "" {
+		attrs = append(attrs, emailAttr)
+	}
+
+	searchReq := ldap.NewSearchRequest(
+		userSearchBase,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		filter, attrs, nil,
+	)
+
+	result, err := conn.Search(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("AD expired user search: %w", err)
+	}
+
+	var users []ExpiringUser
+	for _, entry := range result.Entries {
+		pwdLastSetRaw := entry.GetAttributeValue("pwdLastSet")
+		if pwdLastSetRaw == "" || pwdLastSetRaw == "0" {
+			continue
+		}
+		pwdLastSet, err := parseWindowsFileTime(pwdLastSetRaw)
+		if err != nil {
+			continue
+		}
+		expiresAt := pwdLastSet.Add(maxPwdAge)
+		// Only include already-expired passwords
+		if expiresAt.Before(now) {
+			// If daysAfterExpiration > 0, limit how far back we look
+			if daysAfterExpiration > 0 {
+				lowerBound := now.Add(-time.Duration(daysAfterExpiration) * 24 * time.Hour)
+				if expiresAt.Before(lowerBound) {
+					continue
+				}
+			}
+			// daysAfterExpiration == -1 means no lower bound (all expired)
+			daysSinceExpiry := int(now.Sub(expiresAt).Hours() / 24)
+			users = append(users, ExpiringUser{
+				DN:             entry.DN,
+				Username:       entry.GetAttributeValue("sAMAccountName"),
+				Email:          entry.GetAttributeValue(emailAttr),
+				ExpirationDate: expiresAt,
+				DaysRemaining:  -daysSinceExpiry,
+			})
+		}
+	}
+	return users, nil
+}
+
+// searchFreeIPAExpiredUsers searches FreeIPA for users with passwords that have already expired.
+// daysAfterExpiration controls how far back to look: -1 means no limit (all expired),
+// positive value means only include users expired within that many days.
+func searchFreeIPAExpiredUsers(conn idp.LDAPConn, baseDN, userSearchBase, emailAttr string, daysAfterExpiration int) ([]ExpiringUser, error) {
+	if userSearchBase == "" {
+		userSearchBase = baseDN
+	}
+	now := time.Now()
+
+	// Search for enabled accounts with krbPasswordExpiration set
+	filter := "(&(objectClass=posixAccount)(krbPasswordExpiration=*)(!(nsAccountLock=TRUE)))"
+	attrs := []string{"dn", "uid", "krbPasswordExpiration"}
+	if emailAttr != "" {
+		attrs = append(attrs, emailAttr)
+	}
+
+	searchReq := ldap.NewSearchRequest(
+		userSearchBase,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		filter, attrs, nil,
+	)
+
+	result, err := conn.Search(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("FreeIPA expired user search: %w", err)
+	}
+
+	var users []ExpiringUser
+	for _, entry := range result.Entries {
+		expRaw := entry.GetAttributeValue("krbPasswordExpiration")
+		if expRaw == "" {
+			continue
+		}
+		expiresAt, err := parseGeneralizedTime(expRaw)
+		if err != nil {
+			continue
+		}
+		// Only include already-expired passwords
+		if expiresAt.Before(now) {
+			// If daysAfterExpiration > 0, limit how far back we look
+			if daysAfterExpiration > 0 {
+				lowerBound := now.Add(-time.Duration(daysAfterExpiration) * 24 * time.Hour)
+				if expiresAt.Before(lowerBound) {
+					continue
+				}
+			}
+			// daysAfterExpiration == -1 means no lower bound (all expired)
+			daysSinceExpiry := int(now.Sub(expiresAt).Hours() / 24)
+			users = append(users, ExpiringUser{
+				DN:             entry.DN,
+				Username:       entry.GetAttributeValue("uid"),
+				Email:          entry.GetAttributeValue(emailAttr),
+				ExpirationDate: expiresAt,
+				DaysRemaining:  -daysSinceExpiry,
+			})
+		}
+	}
+	return users, nil
+}

@@ -321,6 +321,7 @@ type ExpirationConfig struct {
 	Enabled              bool
 	CronSchedule         string
 	DaysBeforeExpiration int
+	DaysAfterExpiration  int
 	UpdatedAt            time.Time
 }
 

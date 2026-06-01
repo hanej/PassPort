@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -73,6 +74,7 @@ func (h *AdminExpirationHandler) Show(w http.ResponseWriter, r *http.Request) {
 			Enabled:              false,
 			CronSchedule:         "0 6 * * *",
 			DaysBeforeExpiration: 14,
+			DaysAfterExpiration:  0,
 		}
 	}
 
@@ -129,10 +131,62 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 	enabled := r.FormValue("enabled") == "on"
 	cronSchedule := r.FormValue("cron_schedule")
 	daysStr := r.FormValue("days_before_expiration")
+	daysAfterStr := r.FormValue("days_after_expiration")
 
 	days, err := strconv.Atoi(daysStr)
 	if err != nil || days < 1 || days > 90 {
 		days = 14
+	}
+
+	// Validate days_after_expiration: must be an integer (reject floats), must be 0, -1, or positive.
+	var daysAfter int
+	if strings.Contains(daysAfterStr, ".") {
+		h.logger.Debug("invalid days_after_expiration: contains decimal", "value", daysAfterStr)
+		h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
+			Title:   "Password Expiration - " + record.FriendlyName,
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "Days After Expiration must be a whole number (0, -1, or a positive integer)"},
+			Data: map[string]any{
+				"IDP": record,
+				"Config": &db.ExpirationConfig{
+					IDPID:                idpID,
+					Enabled:              enabled,
+					CronSchedule:         cronSchedule,
+					DaysBeforeExpiration: days,
+					DaysAfterExpiration:  0,
+				},
+				"Filters":    buildFiltersFromForm(r, idpID),
+				"ActivePage": "idp",
+			},
+		})
+		return
+	}
+	if daysAfterStr == "" {
+		daysAfter = 0
+	} else {
+		var parseErr error
+		daysAfter, parseErr = strconv.Atoi(daysAfterStr)
+		if parseErr != nil || (daysAfter < -1) {
+			h.logger.Debug("invalid days_after_expiration", "value", daysAfterStr, "error", parseErr)
+			h.renderer.Render(w, r, "admin_idp_expiration.html", PageData{
+				Title:   "Password Expiration - " + record.FriendlyName,
+				Session: sess,
+				Flash:   map[string]string{"category": "error", "message": "Days After Expiration must be 0 (disabled), -1 (indefinitely), or a positive integer"},
+				Data: map[string]any{
+					"IDP": record,
+					"Config": &db.ExpirationConfig{
+						IDPID:                idpID,
+						Enabled:              enabled,
+						CronSchedule:         cronSchedule,
+						DaysBeforeExpiration: days,
+						DaysAfterExpiration:  0,
+					},
+					"Filters":    buildFiltersFromForm(r, idpID),
+					"ActivePage": "idp",
+				},
+			})
+			return
+		}
 	}
 
 	// Validate cron schedule.
@@ -152,6 +206,7 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 					Enabled:              enabled,
 					CronSchedule:         cronSchedule,
 					DaysBeforeExpiration: days,
+					DaysAfterExpiration:  daysAfter,
 				},
 				"Filters":    buildFiltersFromForm(r, idpID),
 				"ActivePage": "idp",
@@ -166,6 +221,7 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 		Enabled:              enabled,
 		CronSchedule:         cronSchedule,
 		DaysBeforeExpiration: days,
+		DaysAfterExpiration:  daysAfter,
 		UpdatedAt:            time.Now().UTC(),
 	}
 
@@ -222,7 +278,7 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 		Action:     audit.ActionExpirationConfigUpdate,
 		ProviderID: idpID,
 		Result:     audit.ResultSuccess,
-		Details:    fmt.Sprintf("Updated expiration config (enabled=%v, schedule=%s, days=%d, filters=%d)", enabled, cronSchedule, days, len(filters)),
+		Details:    fmt.Sprintf("Updated expiration config (enabled=%v, schedule=%s, days_before=%d, days_after=%d, filters=%d)", enabled, cronSchedule, days, daysAfter, len(filters)),
 	})
 
 	// Reload filters from DB for display.
@@ -291,11 +347,15 @@ func (h *AdminExpirationHandler) DryRun(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.renderer.JSON(w, http.StatusOK, map[string]any{
-		"status":         "success",
-		"total_users":    result.TotalUsers,
-		"excluded_count": result.ExcludedCount,
-		"eligible_count": result.EligibleCount,
-		"users":          result.Users,
+		"status":                 "success",
+		"total_users":            result.TotalUsers,
+		"excluded_count":         result.ExcludedCount,
+		"eligible_count":         result.EligibleCount,
+		"users":                  result.Users,
+		"expired_total":          result.ExpiredTotal,
+		"expired_excluded_count": result.ExpiredExcludedCount,
+		"expired_eligible_count": result.ExpiredEligibleCount,
+		"expired_users":          result.ExpiredUsers,
 	})
 }
 

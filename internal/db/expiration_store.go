@@ -11,13 +11,13 @@ import (
 // Returns nil with no error if no configuration exists.
 func (d *DB) GetExpirationConfig(ctx context.Context, idpID string) (*ExpirationConfig, error) {
 	row := d.reader.QueryRowContext(ctx, `
-		SELECT idp_id, enabled, cron_schedule, days_before_expiration, updated_at
+		SELECT idp_id, enabled, cron_schedule, days_before_expiration, days_after_expiration, updated_at
 		FROM idp_expiration_config WHERE idp_id = ?`, idpID)
 
 	var cfg ExpirationConfig
 	var enabled int
 	var updatedAt string
-	err := row.Scan(&cfg.IDPID, &enabled, &cfg.CronSchedule, &cfg.DaysBeforeExpiration, &updatedAt)
+	err := row.Scan(&cfg.IDPID, &enabled, &cfg.CronSchedule, &cfg.DaysBeforeExpiration, &cfg.DaysAfterExpiration, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -38,14 +38,15 @@ func (d *DB) SaveExpirationConfig(ctx context.Context, cfg *ExpirationConfig) er
 		enabled = 1
 	}
 	_, err := d.writer.ExecContext(ctx, `
-		INSERT INTO idp_expiration_config (idp_id, enabled, cron_schedule, days_before_expiration, updated_at)
-		VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		INSERT INTO idp_expiration_config (idp_id, enabled, cron_schedule, days_before_expiration, days_after_expiration, updated_at)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 		ON CONFLICT(idp_id) DO UPDATE SET
 			enabled                = excluded.enabled,
 			cron_schedule          = excluded.cron_schedule,
 			days_before_expiration = excluded.days_before_expiration,
+			days_after_expiration  = excluded.days_after_expiration,
 			updated_at             = excluded.updated_at`,
-		cfg.IDPID, enabled, cfg.CronSchedule, cfg.DaysBeforeExpiration)
+		cfg.IDPID, enabled, cfg.CronSchedule, cfg.DaysBeforeExpiration, cfg.DaysAfterExpiration)
 	if err != nil {
 		return fmt.Errorf("save expiration config: %w", err)
 	}
@@ -113,7 +114,7 @@ func (d *DB) SaveExpirationFilters(ctx context.Context, idpID string, filters []
 // ListEnabledExpirationConfigs returns all expiration configurations that are enabled.
 func (d *DB) ListEnabledExpirationConfigs(ctx context.Context) ([]ExpirationConfig, error) {
 	rows, err := d.reader.QueryContext(ctx, `
-		SELECT idp_id, enabled, cron_schedule, days_before_expiration, updated_at
+		SELECT idp_id, enabled, cron_schedule, days_before_expiration, days_after_expiration, updated_at
 		FROM idp_expiration_config WHERE enabled = 1`)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled expiration configs: %w", err)
@@ -125,7 +126,7 @@ func (d *DB) ListEnabledExpirationConfigs(ctx context.Context) ([]ExpirationConf
 		var cfg ExpirationConfig
 		var enabled int
 		var updatedAt string
-		if err := rows.Scan(&cfg.IDPID, &enabled, &cfg.CronSchedule, &cfg.DaysBeforeExpiration, &updatedAt); err != nil {
+		if err := rows.Scan(&cfg.IDPID, &enabled, &cfg.CronSchedule, &cfg.DaysBeforeExpiration, &cfg.DaysAfterExpiration, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan expiration config: %w", err)
 		}
 		cfg.Enabled = enabled == 1

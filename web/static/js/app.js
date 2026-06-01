@@ -622,6 +622,7 @@ function initDryRun() {
         document.getElementById('dry-run-error').classList.add('d-none');
         document.getElementById('dry-run-results').classList.add('d-none');
         document.getElementById('dry-run-tbody').innerHTML = '';
+        document.getElementById('dry-run-expired-tbody').innerHTML = '';
 
         modal.show();
 
@@ -640,9 +641,11 @@ function initDryRun() {
                 return;
             }
 
+            // --- Expiring Soon tab ---
             document.getElementById('dry-run-total').textContent = data.total_users;
             document.getElementById('dry-run-excluded').textContent = data.excluded_count;
             document.getElementById('dry-run-eligible').textContent = data.eligible_count;
+            document.getElementById('dry-run-warning-badge').textContent = data.eligible_count;
 
             var tbody = document.getElementById('dry-run-tbody');
             var users = data.users || [];
@@ -652,11 +655,7 @@ function initDryRun() {
             } else {
                 users.forEach(function (u) {
                     var tr = document.createElement('tr');
-                    if (u.excluded) {
-                        tr.className = 'table-danger';
-                    }
-
-                    // Store sort values and DN as data attributes.
+                    if (u.excluded) tr.className = 'table-danger';
                     tr.setAttribute('data-dn', u.dn || '');
                     tr.setAttribute('data-sort-username', (u.username || '').toLowerCase());
                     tr.setAttribute('data-sort-email', (u.email || '').toLowerCase());
@@ -699,9 +698,86 @@ function initDryRun() {
                     tbody.appendChild(tr);
                 });
 
-                // Wire up sortable column headers and row clicks.
-                initDryRunTableSort();
-                initDryRunRowClick(idpID);
+                initDryRunTableSort('dry-run-table', 'dry-run-tbody');
+                initDryRunRowClick(idpID, 'dry-run-tbody');
+            }
+
+            // --- Already Expired tab ---
+            var expiredTotal = data.expired_total || 0;
+            var expiredExcluded = data.expired_excluded_count || 0;
+            var expiredEligible = data.expired_eligible_count || 0;
+            var expiredUsers = data.expired_users || [];
+
+            document.getElementById('dry-run-expired-badge').textContent = expiredEligible;
+
+            var disabledMsg = document.getElementById('dry-run-expired-disabled');
+            var expiredContent = document.getElementById('dry-run-expired-content');
+
+            if (expiredTotal === 0 && expiredUsers.length === 0 && data.expired_total === undefined) {
+                // days_after_expiration is 0 (disabled)
+                disabledMsg.classList.remove('d-none');
+                expiredContent.classList.add('d-none');
+            } else {
+                disabledMsg.classList.add('d-none');
+                expiredContent.classList.remove('d-none');
+
+                document.getElementById('dry-run-expired-total').textContent = expiredTotal;
+                document.getElementById('dry-run-expired-excluded').textContent = expiredExcluded;
+                document.getElementById('dry-run-expired-eligible').textContent = expiredEligible;
+
+                var expiredTbody = document.getElementById('dry-run-expired-tbody');
+
+                if (expiredUsers.length === 0) {
+                    expiredTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No already-expired users found.</td></tr>';
+                } else {
+                    expiredUsers.forEach(function (u) {
+                        var tr = document.createElement('tr');
+                        if (u.excluded) tr.className = 'table-danger';
+                        tr.setAttribute('data-dn', u.dn || '');
+                        tr.setAttribute('data-sort-username', (u.username || '').toLowerCase());
+                        tr.setAttribute('data-sort-email', (u.email || '').toLowerCase());
+                        tr.setAttribute('data-sort-expiration', u.expiration_epoch || 0);
+                        tr.setAttribute('data-sort-days', u.days_remaining);
+                        tr.setAttribute('data-sort-filter', (u.filter_match || '').toLowerCase());
+                        tr.style.cursor = 'pointer';
+
+                        var tdUser = document.createElement('td');
+                        tdUser.className = 'fw-semibold';
+                        tdUser.textContent = u.username;
+
+                        var tdEmail = document.createElement('td');
+                        tdEmail.textContent = u.email || '(none)';
+                        if (!u.email) tdEmail.className = 'text-muted fst-italic';
+
+                        var tdExpiry = document.createElement('td');
+                        tdExpiry.textContent = u.expiration_date;
+
+                        var tdDays = document.createElement('td');
+                        tdDays.className = 'text-center';
+                        var expBadge = document.createElement('span');
+                        expBadge.className = 'badge bg-danger';
+                        expBadge.textContent = u.days_remaining; // positive "days expired" value
+                        tdDays.appendChild(expBadge);
+
+                        var tdFilter = document.createElement('td');
+                        if (u.excluded && u.filter_match) {
+                            var filterBadge2 = document.createElement('span');
+                            filterBadge2.className = 'badge bg-danger-subtle text-danger';
+                            filterBadge2.textContent = u.filter_match;
+                            tdFilter.appendChild(filterBadge2);
+                        }
+
+                        tr.appendChild(tdUser);
+                        tr.appendChild(tdEmail);
+                        tr.appendChild(tdExpiry);
+                        tr.appendChild(tdDays);
+                        tr.appendChild(tdFilter);
+                        expiredTbody.appendChild(tr);
+                    });
+
+                    initDryRunTableSort('dry-run-expired-table', 'dry-run-expired-tbody');
+                    initDryRunRowClick(idpID, 'dry-run-expired-tbody');
+                }
             }
 
             // Hide attribute panel from a previous run.
@@ -719,8 +795,8 @@ function initDryRun() {
 
 /* ---- Dry Run Table Sorting ---- */
 
-function initDryRunTableSort() {
-    var table = document.getElementById('dry-run-table');
+function initDryRunTableSort(tableId, tbodyId) {
+    var table = document.getElementById(tableId);
     if (!table) return;
 
     var headers = table.querySelectorAll('th.sortable');
@@ -747,7 +823,7 @@ function initDryRunTableSort() {
             activeIcon.className = ascending ? 'bi bi-chevron-up small' : 'bi bi-chevron-down small';
         }
 
-        var tbody = document.getElementById('dry-run-tbody');
+        var tbody = document.getElementById(tbodyId);
         var rows = Array.from(tbody.querySelectorAll('tr[data-sort-username]'));
 
         rows.sort(function (a, b) {
@@ -779,19 +855,25 @@ function initDryRunTableSort() {
 
 /* ---- Dry Run Row Click — Show User Attributes ---- */
 
-function initDryRunRowClick(idpID) {
-    var tbody = document.getElementById('dry-run-tbody');
+function initDryRunRowClick(idpID, tbodyId) {
+    var tbody = document.getElementById(tbodyId);
     var panel = document.getElementById('dry-run-attr-panel');
     var closeBtn = document.getElementById('dry-run-attr-close');
     if (!tbody || !panel) return;
 
-    closeBtn.addEventListener('click', function () {
-        panel.classList.add('d-none');
-        tbody.querySelectorAll('tr.table-primary, tr.table-info').forEach(function (r) {
-            // Restore original class (danger for excluded, nothing for eligible).
-            r.classList.remove('table-primary', 'table-info');
+    // Only bind the close button once.
+    if (!closeBtn._bound) {
+        closeBtn._bound = true;
+        closeBtn.addEventListener('click', function () {
+            panel.classList.add('d-none');
+            ['dry-run-tbody', 'dry-run-expired-tbody'].forEach(function (id) {
+                var b = document.getElementById(id);
+                if (b) b.querySelectorAll('tr.table-primary, tr.table-info').forEach(function (r) {
+                    r.classList.remove('table-primary', 'table-info');
+                });
+            });
         });
-    });
+    }
 
     tbody.addEventListener('click', function (e) {
         var row = e.target.closest('tr[data-dn]');
@@ -800,10 +882,14 @@ function initDryRunRowClick(idpID) {
         var dn = row.getAttribute('data-dn');
         if (!dn) return;
 
-        // Highlight selected row.
-        tbody.querySelectorAll('tr.table-primary, tr.table-info').forEach(function (r) {
-            r.classList.remove('table-primary', 'table-info');
+        // Clear highlights from both tables.
+        ['dry-run-tbody', 'dry-run-expired-tbody'].forEach(function (id) {
+            var b = document.getElementById(id);
+            if (b) b.querySelectorAll('tr.table-primary, tr.table-info').forEach(function (r) {
+                r.classList.remove('table-primary', 'table-info');
+            });
         });
+
         if (!row.classList.contains('table-danger')) {
             row.classList.add('table-info');
         } else {

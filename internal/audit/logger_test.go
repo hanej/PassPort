@@ -119,6 +119,9 @@ func TestLogMultipleEntries(t *testing.T) {
 	for scanner.Scan() {
 		count++
 	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scanner error: %v", err)
+	}
 	if count != 5 {
 		t.Errorf("expected 5 file lines, got %d", count)
 	}

@@ -32,6 +32,7 @@ const (
 	ActionEmailTemplateUpdate    = "email_template_update"
 	ActionEmailTemplateReset     = "email_template_reset"
 	ActionExpirationNotification = "expiration_notification"
+	ActionExpiredNotification    = "expired_notification"
 	ActionExpirationConfigUpdate = "expiration_config_update"
 	ActionReportConfigUpdate     = "report_config_update"
 	ActionReportSent             = "report_sent"
