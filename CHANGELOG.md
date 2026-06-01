@@ -14,6 +14,7 @@ All notable changes to PassPort are documented in this file.
 ### Fixed
 - **`bufio.Scanner` missing `Err()` check in audit logger test** — The scan loop did not inspect `scanner.Err()` after completion, which could mask I/O errors.
 - **Email template preview missing sample data for report and expired templates** — The preview handler did not populate `GeneratedDate`, `AccountCount`, or `ReportTable` for report-type templates, nor `DaysExpired` or `TempPassword` for their respective template types. All sample data variables are now present so every template type renders correctly in the preview modal.
+- **PassPort service not restarting on RPM upgrade** — The `postinstall.sh` script enabled the service but did not restart it, causing upgrades to keep the old binary running in memory. Now explicitly calls `systemctl restart passport` after enable, ensuring new binaries load immediately.
 
 ---
 
