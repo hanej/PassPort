@@ -6,6 +6,13 @@ All notable changes to PassPort are documented in this file.
 
 ## [v1.1.7] - 2026-06-08
 
+### Fixed
+- **Cross-IDP password changes could fail for linked accounts** — Password change lookup required the mapping's `auth_provider_id` to match the current login provider. Users with the same username in multiple IDPs (for example `corp-ad` and `redhat-idm`) could be incorrectly shown as unlinked. Password changes now resolve the linked target account by username + target IDP so the correct mapped account is used.
+
+---
+
+## [v1.1.6] - 2026-06-01
+
 ### Added
 - **Expired password notifications** — A new "Days After Expiration" setting under Password Expiration Notifications configures how long to keep sending notification emails to accounts whose passwords have already expired. Accepts `0` (disabled), `-1` (indefinitely), or a positive integer (number of days after expiration). Requires database migration 004.
 - **`password_expired` email template** — A new global template type with variables `Username`, `ProviderName`, `ExpirationDate`, and `DaysExpired`. Per-IDP overrides follow the same `password_expired:{idpID}` key pattern as the existing warning template.
