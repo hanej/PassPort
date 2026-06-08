@@ -4,7 +4,7 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
-## [v1.1.6] - 2026-06-01
+## [v1.1.7] - 2026-06-08
 
 ### Added
 - **Expired password notifications** — A new "Days After Expiration" setting under Password Expiration Notifications configures how long to keep sending notification emails to accounts whose passwords have already expired. Accepts `0` (disabled), `-1` (indefinitely), or a positive integer (number of days after expiration). Requires database migration 004.

@@ -218,6 +218,11 @@ type CorrelationWarningStore interface {
 // MappingStore manages user-to-IDP account mappings.
 type MappingStore interface {
 	GetMapping(ctx context.Context, authProviderID, authUsername, targetIDPID string) (*UserIDPMapping, error)
+	// GetMappingForTarget retrieves a mapping by username and target IDP regardless
+	// of which auth provider originally created it. Used when a user's mapping may
+	// have been created under a different auth provider than the one they are
+	// currently logged in with (e.g. same username in corp-ad and redhat-idm).
+	GetMappingForTarget(ctx context.Context, authUsername, targetIDPID string) (*UserIDPMapping, error)
 	HasMappingToTarget(ctx context.Context, authUsername, targetIDPID string) (bool, error)
 	ListMappings(ctx context.Context, authProviderID, authUsername string) ([]UserIDPMapping, error)
 	SearchMappings(ctx context.Context, filter MappingSearchFilter) ([]UserIDPMapping, int, error)

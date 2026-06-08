@@ -28,6 +28,31 @@ func (d *DB) GetMapping(ctx context.Context, authProviderID, authUsername, targe
 	return m, nil
 }
 
+// GetMappingForTarget retrieves a mapping by username and target IDP regardless
+// of which auth provider originally created it. This is used when a user may
+// have the same username across multiple providers (e.g. corp-ad and redhat-idm)
+// and the mapping was created under a different provider than the one they are
+// currently logged in with.
+// Returns ErrNotFound if no matching row exists.
+func (d *DB) GetMappingForTarget(ctx context.Context, authUsername, targetIDPID string) (*UserIDPMapping, error) {
+	row := d.reader.QueryRowContext(ctx, `
+		SELECT id, auth_provider_id, auth_username, target_idp_id,
+			target_account_dn, link_type, linked_at, verified_at
+		FROM user_idp_mappings
+		WHERE auth_username = ? AND target_idp_id = ?
+		LIMIT 1`,
+		authUsername, targetIDPID)
+
+	m, err := scanMapping(row)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get mapping for target: %w", err)
+	}
+	return m, nil
+}
+
 // HasMappingToTarget returns true if any mapping exists for the given username
 // and target IDP, regardless of which auth provider created it.
 func (d *DB) HasMappingToTarget(ctx context.Context, authUsername, targetIDPID string) (bool, error) {
