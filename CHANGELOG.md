@@ -4,6 +4,16 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.1.7] - 2026-06-08
+
+### Fixed
+- **Cross-IDP password changes could fail for linked accounts** — Password change lookup required the mapping's `auth_provider_id` to match the current login provider. Users with the same username in multiple IDPs (for example `corp-ad` and `redhat-idm`) could be incorrectly shown as unlinked. Password changes now resolve the linked target account by username + target IDP so the correct mapped account is used.
+
+### Security
+- **Go toolchain updated to 1.26.4** — Fixes `GO-2026-5039` (arbitrary inputs included in errors without escaping in `net/textproto`) and `GO-2026-5037` (inefficient candidate hostname parsing in `crypto/x509`).
+
+---
+
 ## [v1.1.6] - 2026-06-01
 
 ### Added

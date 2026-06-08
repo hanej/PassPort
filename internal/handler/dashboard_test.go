@@ -561,6 +561,57 @@ func TestChangePassword_Failure(t *testing.T) {
 	}
 }
 
+// TestChangePassword_CrossProvider verifies that a user can change their password
+// even when their mapping was created under a different auth provider than the one
+// they are currently logged in with (same username across corp-ad and redhat-idm).
+func TestChangePassword_CrossProvider(t *testing.T) {
+	env := setupDashboardTest(t)
+
+	if err := env.db.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID: "corp-ad", FriendlyName: "Corp AD", ProviderType: "ad", Enabled: true, ConfigJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if err := env.db.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID: "redhat-idm", FriendlyName: "Red Hat IDM", ProviderType: "freeipa", Enabled: true, ConfigJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	// Mapping was originally created when the user logged in via corp-ad.
+	mapping := &db.UserIDPMapping{
+		AuthProviderID:  "corp-ad",
+		AuthUsername:    "jschulze",
+		TargetIDPID:     "corp-ad",
+		TargetAccountDN: "CN=Test User,OU=Users,DC=example,DC=com",
+		LinkType:        "auto",
+		LinkedAt:        time.Now().UTC(),
+	}
+	if err := env.db.UpsertMapping(context.Background(), mapping); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+
+	env.registry.Register("corp-ad", &mockProvider{id: "corp-ad"})
+
+	// User is now logged in via redhat-idm (same username, different auth provider).
+	cookies := env.createSessionWithCookies(t, "provider", "redhat-idm", "jschulze", false)
+
+	form := url.Values{}
+	form.Set("idp_id", "corp-ad")
+	form.Set("current_password", "old")
+	form.Set("new_password", "NewPass1!")
+	form.Set("confirm_password", "NewPass1!")
+
+	rec := env.serveWithSession(t, env.handler.ChangePassword, http.MethodPost, "/dashboard/change-password", cookies, form.Encode())
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/dashboard" {
+		t.Errorf("expected /dashboard, got %s", loc)
+	}
+}
+
 // --- DB error path tests ---
 
 type mockDashboardErrStore struct {

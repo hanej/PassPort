@@ -226,16 +226,27 @@ func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 	}
 
 	// Verify the user has a mapping for this IDP.
-	mapping, err := h.store.GetMapping(r.Context(), authProvider, sess.Username, idpID)
+	// Use GetMappingForTarget (no auth_provider_id filter) so users with the same
+	// username across multiple providers can still change their password even when
+	// their mapping was created under a different provider than the one they are
+	// currently logged in with.
+	mapping, err := h.store.GetMappingForTarget(r.Context(), sess.Username, idpID)
 	if err != nil {
-		h.logger.Warn("no mapping found for password change",
-			"idp_id", idpID,
-			"username", sess.Username,
-			"error", err,
-		)
-		h.sessions.SetFlash(w, r, "error", "Account not linked to this identity provider")
-		http.Redirect(w, r, "/dashboard", http.StatusFound)
-		return
+		// Fall back to the strict lookup for local admins where auth_provider_id
+		// matters (mapping key is "local").
+		if authProvider == "local" {
+			mapping, err = h.store.GetMapping(r.Context(), authProvider, sess.Username, idpID)
+		}
+		if err != nil {
+			h.logger.Warn("no mapping found for password change",
+				"idp_id", idpID,
+				"username", sess.Username,
+				"error", err,
+			)
+			h.sessions.SetFlash(w, r, "error", "Account not linked to this identity provider")
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
 	}
 
 	// Get the provider from the registry.
