@@ -1,25 +1,24 @@
 {{define "pagination"}}
 {{if and .TotalPages (gt .TotalPages 1)}}
 <nav aria-label="Page navigation">
-    <ul class="pagination justify-content-center">
-        <li class="page-item{{if le .CurrentPage 1}} disabled{{end}}">
-            <a class="page-link" href="{{.BaseURL}}?page={{if gt .CurrentPage 1}}{{subtract .CurrentPage 1}}{{else}}1{{end}}"
-               aria-label="Previous">
-                <span aria-hidden="true">&laquo;</span> Previous
-            </a>
-        </li>
-        {{range $page := pages .TotalPages}}
-        <li class="page-item{{if eq $page $.CurrentPage}} active{{end}}">
-            <a class="page-link" href="{{$.BaseURL}}?page={{$page}}">{{$page}}</a>
-        </li>
-        {{end}}
-        <li class="page-item{{if ge .CurrentPage .TotalPages}} disabled{{end}}">
-            <a class="page-link" href="{{.BaseURL}}?page={{if lt .CurrentPage .TotalPages}}{{add .CurrentPage 1}}{{else}}{{.TotalPages}}{{end}}"
-               aria-label="Next">
-                Next <span aria-hidden="true">&raquo;</span>
-            </a>
-        </li>
-    </ul>
+    <div class="d-flex align-items-center justify-content-end gap-2">
+        <a class="btn btn-sm btn-outline-secondary{{if le .CurrentPage 1}} disabled{{end}}"
+           href="{{.BaseURL}}&page={{if gt .CurrentPage 1}}{{subtract .CurrentPage 1}}{{else}}1{{end}}"
+           aria-label="Previous">
+            <span aria-hidden="true">&laquo;</span> Previous
+        </a>
+        <select class="form-select form-select-sm w-auto" aria-label="Select page"
+                onchange="window.location.href='{{.BaseURL}}&page='+this.value">
+            {{range $page := pages .TotalPages}}
+            <option value="{{$page}}"{{if eq $page $.CurrentPage}} selected{{end}}>Page {{$page}} of {{$.TotalPages}}</option>
+            {{end}}
+        </select>
+        <a class="btn btn-sm btn-outline-secondary{{if ge .CurrentPage .TotalPages}} disabled{{end}}"
+           href="{{.BaseURL}}&page={{if lt .CurrentPage .TotalPages}}{{add .CurrentPage 1}}{{else}}{{.TotalPages}}{{end}}"
+           aria-label="Next">
+            Next <span aria-hidden="true">&raquo;</span>
+        </a>
+    </div>
 </nav>
 {{end}}
 {{end}}

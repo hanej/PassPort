@@ -4,6 +4,13 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.1.8] - 2026-06-29
+
+### Improved
+- **Audit log pagination replaced with page dropdown** — When the audit log spans many pages, the previous row of numbered page links could grow very long. The pagination control now shows a compact **Previous / page selector / Next** layout, right-aligned in the card footer. The dropdown displays "Page N of Total" for each page and navigates immediately on selection.
+
+---
+
 ## [v1.1.7] - 2026-06-08
 
 ### Fixed
