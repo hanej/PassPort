@@ -4,6 +4,11 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`-example-config` CLI flag** — PassPort can now print a built-in example `config.yaml` to stdout and exit. The sample configuration is embedded from `cmd/passport/config.yaml.example`, making it easy to generate a starting config without copying from documentation.
+
 ## [v1.1.8] - 2026-06-29
 
 ### Improved
