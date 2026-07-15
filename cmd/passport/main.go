@@ -124,7 +124,10 @@ func main() {
 	}
 
 	if *showExampleConfig {
-		os.Stdout.Write(exampleConfig)
+		if _, err := os.Stdout.Write(exampleConfig); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write example config: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -413,6 +416,7 @@ func main() {
 		Store:               database,
 		CSRFKey:             csrfKey,
 		SecureCookie:        cfg.SecureCookies(),
+		TrustProxy:          cfg.Server.TrustProxy,
 		LoginLimiter:        loginLimiter,
 		LinkLimiter:         linkLimiter,
 		UploadsDir:          uploadsDir,

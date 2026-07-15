@@ -56,6 +56,7 @@ type RouterConfig struct {
 	Store               db.Store
 	CSRFKey             []byte
 	SecureCookie        bool
+	TrustProxy          bool
 	LoginLimiter        *ratelimit.Limiter
 	LinkLimiter         *ratelimit.Limiter
 	UploadsDir          string
@@ -67,7 +68,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware (applied to all routes)
-	r.Use(middleware.RealIP)
+	if cfg.TrustProxy {
+		// Trust a single reverse proxy hop when extracting client IP from X-Forwarded-For.
+		r.Use(middleware.ClientIPFromXFFTrustedProxies(1))
+	} else {
+		r.Use(middleware.ClientIPFromRemoteAddr)
+	}
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(cfg.Logger))
