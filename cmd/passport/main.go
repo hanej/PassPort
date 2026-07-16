@@ -349,7 +349,7 @@ func main() {
 	// Initialize handlers
 	healthHandler := handler.NewHealthHandler(database, logger)
 	loginHandler := handler.NewLoginHandler(database, sessions, registry, correlator, cryptoSvc, renderer, auditLogger, logger)
-	dashboardHandler := handler.NewDashboardHandler(database, sessions, registry, correlator, renderer, auditLogger, logger)
+	dashboardHandler := handler.NewDashboardHandler(database, sessions, registry, correlator, cryptoSvc, renderer, auditLogger, logger)
 	linkHandler := handler.NewLinkHandler(database, sessions, registry, renderer, auditLogger, logger)
 	bootstrapHandler := handler.NewBootstrapHandler(database, sessions, renderer, auditLogger, policy, logger)
 	uploadsDir := filepath.Join(filepath.Dir(cfg.Database.Path), "uploads")
@@ -369,8 +369,8 @@ func main() {
 
 	adminMFAHandler := handler.NewAdminMFAHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	mfaHandler := handler.NewMFAHandler(database, sessions, cryptoSvc, registry, renderer, auditLogger, logger)
-	forgotPasswordHandler := handler.NewForgotPasswordHandler(database, registry, sessions, renderer, auditLogger, logger)
-	adChangePasswordHandler := handler.NewADChangePasswordHandler(sessions, renderer, auditLogger, logger, registry, database)
+	forgotPasswordHandler := handler.NewForgotPasswordHandler(database, registry, cryptoSvc, sessions, renderer, auditLogger, logger)
+	adChangePasswordHandler := handler.NewADChangePasswordHandler(sessions, renderer, auditLogger, logger, registry, database, cryptoSvc)
 
 	adminSMTPHandler := handler.NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	adminEmailTemplatesHandler := handler.NewAdminEmailTemplatesHandler(database, renderer, sessions, auditLogger, logger)

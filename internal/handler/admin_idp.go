@@ -923,15 +923,15 @@ func (h *AdminIDPHandler) TestConnectionFromForm(w http.ResponseWriter, r *http.
 	if (secrets.ServiceAccountUsername == "" || secrets.ServiceAccountPassword == "") && idpID != "" {
 		record, err := h.store.GetIDP(r.Context(), idpID)
 		if err != nil {
-			h.logger.Debug("could not load saved IDP for credential fallback", "idp_id", idpID, "error", err)
+			h.logger.Warn("could not load saved IDP for credential fallback", "idp_id", idpID, "error", err)
 		} else if len(record.SecretBlob) > 0 {
 			plaintext, err := h.crypto.Decrypt(record.SecretBlob)
 			if err != nil {
-				h.logger.Debug("could not decrypt saved secrets", "idp_id", idpID, "error", err)
+				h.logger.Warn("could not decrypt saved secrets", "idp_id", idpID, "error", err)
 			} else {
 				var saved idp.Secrets
 				if err := json.Unmarshal(plaintext, &saved); err != nil {
-					h.logger.Debug("could not parse saved secrets", "idp_id", idpID, "error", err)
+					h.logger.Warn("could not parse saved secrets", "idp_id", idpID, "error", err)
 				} else {
 					if secrets.ServiceAccountUsername == "" {
 						secrets.ServiceAccountUsername = saved.ServiceAccountUsername

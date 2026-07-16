@@ -4,23 +4,20 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"strings"
 )
 
 // KeyFunc extracts a rate-limiting key from an HTTP request.
 type KeyFunc func(r *http.Request) string
 
-// KeyByIP returns the client IP address, preferring the X-Forwarded-For header
-// and falling back to the request's RemoteAddr.
+// KeyByIP returns the client IP address from the request's RemoteAddr.
+//
+// This intentionally does NOT read X-Forwarded-For directly — trusting a
+// client-supplied header here would let anyone bypass per-IP rate limiting
+// simply by rotating its value. When PassPort is deployed behind a trusted
+// reverse proxy (trust_proxy: true in config.yaml), handler.NewRouter wires
+// up middleware that resolves the real client IP from X-Forwarded-For and
+// mirrors it into RemoteAddr before this key function ever runs.
 func KeyByIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For may contain a comma-separated list; use the first entry.
-		if i := strings.IndexByte(xff, ','); i != -1 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-
 	// RemoteAddr is host:port; strip the port.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

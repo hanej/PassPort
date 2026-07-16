@@ -16,6 +16,7 @@ import (
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/idp"
 )
@@ -58,6 +59,15 @@ func setupDashboardTest(t *testing.T) *dashboardTestEnv {
 	registry := idp.NewRegistry(logger)
 	correlator := &mockCorrelator{}
 
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	cryptoSvc, err := crypto.NewService(key, 1)
+	if err != nil {
+		t.Fatalf("creating crypto service: %v", err)
+	}
+
 	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
@@ -70,7 +80,7 @@ func setupDashboardTest(t *testing.T) *dashboardTestEnv {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewDashboardHandler(database, sm, registry, correlator, renderer, auditLog, logger)
+	h := NewDashboardHandler(database, sm, registry, correlator, cryptoSvc, renderer, auditLog, logger)
 
 	return &dashboardTestEnv{
 		db:         database,
@@ -650,6 +660,15 @@ func newDashboardHandlerWithStore(t *testing.T, database *db.DB, store db.Store)
 	registry := idp.NewRegistry(logger)
 	correlator := &mockCorrelator{}
 
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	cryptoSvc, err := crypto.NewService(key, 1)
+	if err != nil {
+		t.Fatalf("creating crypto service: %v", err)
+	}
+
 	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
@@ -662,7 +681,7 @@ func newDashboardHandlerWithStore(t *testing.T, database *db.DB, store db.Store)
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	return NewDashboardHandler(store, sm, registry, correlator, renderer, auditLog, logger), sm
+	return NewDashboardHandler(store, sm, registry, correlator, cryptoSvc, renderer, auditLog, logger), sm
 }
 
 // TestShowDashboard_ListEnabledIDPsError covers the error path when ListEnabledIDPs fails → 500.

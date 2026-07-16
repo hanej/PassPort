@@ -101,6 +101,10 @@ func TestCreateSession(t *testing.T) {
 }
 
 func TestCreateSessionXForwardedFor(t *testing.T) {
+	// clientIP no longer trusts a client-supplied X-Forwarded-For header
+	// directly (see TestCreateSessionIgnoresXForwardedFor) — the session IP
+	// always comes from RemoteAddr, which handler.NewRouter's middleware
+	// keeps trust_proxy-aware for real deployments.
 	sm, d := newTestManager(t)
 
 	rec := httptest.NewRecorder()
@@ -116,8 +120,8 @@ func TestCreateSessionXForwardedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if sess.IPAddress != "10.0.0.1" {
-		t.Errorf("ip = %s, want 10.0.0.1", sess.IPAddress)
+	if sess.IPAddress != "192.0.2.1" {
+		t.Errorf("ip = %s, want RemoteAddr-derived 192.0.2.1 (XFF ignored)", sess.IPAddress)
 	}
 }
 
@@ -618,13 +622,18 @@ func TestSetFlashNoSession(t *testing.T) {
 	sm.SetFlash(rec, req, "success", "test message")
 }
 
-func TestCreateSessionXForwardedFor_Single(t *testing.T) {
-	// X-Forwarded-For with a single IP (no comma) → uses the xff directly.
+func TestCreateSessionIgnoresXForwardedFor(t *testing.T) {
+	// clientIP must not trust a client-supplied X-Forwarded-For header directly
+	// — otherwise any client could spoof the IP recorded against their own
+	// session. Real IP resolution only happens via the ClientIPFrom* +
+	// mirrorResolvedClientIP middleware in handler.NewRouter, which is not
+	// present in this direct SessionManager test.
 	sm, d := newTestManager(t)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	req.RemoteAddr = "192.0.2.5:1234"
 
 	id, err := sm.CreateSession(rec, req, "local", "", "admin", true, false)
 	if err != nil {
@@ -635,8 +644,8 @@ func TestCreateSessionXForwardedFor_Single(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if sess.IPAddress != "203.0.113.1" {
-		t.Errorf("ip = %s, want 203.0.113.1", sess.IPAddress)
+	if sess.IPAddress != "192.0.2.5" {
+		t.Errorf("ip = %s, want RemoteAddr-derived 192.0.2.5 (XFF ignored)", sess.IPAddress)
 	}
 }
 

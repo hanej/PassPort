@@ -10,6 +10,7 @@ import (
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/idp"
 )
@@ -24,12 +25,14 @@ type ForgotPasswordHandler struct {
 	renderer *Renderer
 	audit    *audit.Logger
 	logger   *slog.Logger
+	crypto   *crypto.Service
 }
 
 // NewForgotPasswordHandler creates a new ForgotPasswordHandler.
 func NewForgotPasswordHandler(
 	store db.Store,
 	registry *idp.Registry,
+	cryptoSvc *crypto.Service,
 	sessions *auth.SessionManager,
 	renderer *Renderer,
 	auditLogger *audit.Logger,
@@ -38,6 +41,7 @@ func NewForgotPasswordHandler(
 	return &ForgotPasswordHandler{
 		store:    store,
 		registry: registry,
+		crypto:   cryptoSvc,
 		sessions: sessions,
 		renderer: renderer,
 		audit:    auditLogger,
@@ -349,6 +353,20 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 		Result:     audit.ResultSuccess,
 		Details:    "Password reset via forgot-password flow",
 	})
+
+	// Best-effort notification email. Failure here must not affect the
+	// already-successful password reset.
+	providerName := sess.ProviderID
+	if idpRecord, idpErr := h.store.GetIDP(r.Context(), sess.ProviderID); idpErr == nil && idpRecord != nil {
+		providerName = idpRecord.FriendlyName
+	}
+	userEmail, emailErr := resolveNotificationEmailByDN(r.Context(), h.store, provider, sess.ProviderID, userDN)
+	if emailErr != nil {
+		h.logger.Warn("could not resolve notification email address",
+			"idp_id", sess.ProviderID, "username", sess.Username, "error", emailErr)
+	}
+	sendPasswordEventEmail(r.Context(), h.store, h.crypto, h.logger,
+		"password_reset", sess.ProviderID, providerName, sess.Username, userEmail, r.RemoteAddr)
 
 	// Destroy the reset session.
 	h.sessions.DestroySession(w, r)

@@ -69,14 +69,18 @@ func TestMiddleware_Returns429WhenLimitExceeded(t *testing.T) {
 	}
 }
 
-func TestKeyByIP_XForwardedFor(t *testing.T) {
+func TestKeyByIP_IgnoresXForwardedFor(t *testing.T) {
+	// KeyByIP must not trust a client-supplied X-Forwarded-For header directly
+	// — otherwise any client could bypass per-IP rate limiting by rotating it.
+	// Real IP resolution only happens via the ClientIPFrom* + mirrorResolvedClientIP
+	// middleware in handler.NewRouter, which is not present in this bare test setup.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 70.41.3.18")
 	req.RemoteAddr = "127.0.0.1:9999"
 
 	key := KeyByIP(req)
-	if key != "203.0.113.50" {
-		t.Fatalf("expected '203.0.113.50', got %q", key)
+	if key != "127.0.0.1" {
+		t.Fatalf("expected RemoteAddr-derived '127.0.0.1' (XFF ignored), got %q", key)
 	}
 }
 
@@ -101,13 +105,15 @@ func TestKeyByUsername_ExtractsFormValue(t *testing.T) {
 	}
 }
 
-func TestKeyByIP_XForwardedForComma(t *testing.T) {
+func TestKeyByIP_IgnoresXForwardedForComma(t *testing.T) {
+	// Same as above but with a multi-value XFF header — still ignored.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	req.RemoteAddr = "192.168.0.9:4321"
 
 	key := KeyByIP(req)
-	if key != "1.2.3.4" {
-		t.Fatalf("expected '1.2.3.4', got %q", key)
+	if key != "192.168.0.9" {
+		t.Fatalf("expected RemoteAddr-derived '192.168.0.9' (XFF ignored), got %q", key)
 	}
 }
 

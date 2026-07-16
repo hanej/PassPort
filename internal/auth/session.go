@@ -64,17 +64,15 @@ func generateSessionID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// clientIP extracts the client IP address from the request,
-// preferring X-Forwarded-For if present.
+// clientIP extracts the client IP address from the request's RemoteAddr.
+//
+// This intentionally does NOT read X-Forwarded-For directly — trusting a
+// client-supplied header here would let anyone spoof the IP recorded against
+// their session. When PassPort is deployed behind a trusted reverse proxy
+// (trust_proxy: true in config.yaml), handler.NewRouter wires up middleware
+// that resolves the real client IP from X-Forwarded-For and mirrors it into
+// RemoteAddr before this ever runs.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain (the original client).
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	// Strip port from RemoteAddr.
 	addr := r.RemoteAddr
 	if idx := strings.LastIndex(addr, ":"); idx != -1 {
 		return addr[:idx]

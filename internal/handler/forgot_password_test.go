@@ -13,6 +13,7 @@ import (
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/idp"
 )
@@ -95,6 +96,15 @@ func setupForgotTest(t *testing.T) *forgotTestEnv {
 	renderer := forgotStubRenderer(t)
 	registry := idp.NewRegistry(logger)
 
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	cryptoSvc, err := crypto.NewService(key, 1)
+	if err != nil {
+		t.Fatalf("creating crypto service: %v", err)
+	}
+
 	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
 	if err != nil {
 		t.Fatalf("creating audit file: %v", err)
@@ -107,7 +117,7 @@ func setupForgotTest(t *testing.T) *forgotTestEnv {
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	h := NewForgotPasswordHandler(database, registry, sm, renderer, auditLog, logger)
+	h := NewForgotPasswordHandler(database, registry, cryptoSvc, sm, renderer, auditLog, logger)
 
 	return &forgotTestEnv{
 		db:       database,
@@ -528,6 +538,15 @@ func newForgotPwMockHandler(t *testing.T, mock *mockForgotPwErrStore) *ForgotPas
 	registry := idp.NewRegistry(logger)
 	sm := auth.NewSessionManager(mock.DB, 30*time.Minute, false, logger)
 
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	cryptoSvc, err := crypto.NewService(key, 1)
+	if err != nil {
+		t.Fatalf("creating crypto service: %v", err)
+	}
+
 	tmpFile, err := os.CreateTemp(t.TempDir(), "audit-*.log")
 	if err != nil {
 		t.Fatalf("creating temp audit file: %v", err)
@@ -540,7 +559,7 @@ func newForgotPwMockHandler(t *testing.T, mock *mockForgotPwErrStore) *ForgotPas
 	}
 	t.Cleanup(func() { _ = auditLog.Close() })
 
-	return NewForgotPasswordHandler(mock, registry, sm, renderer, auditLog, logger)
+	return NewForgotPasswordHandler(mock, registry, cryptoSvc, sm, renderer, auditLog, logger)
 }
 
 // TestForgotPasswordShowForm_ListEnabledIDPsError covers the 500 path in ShowForm

@@ -46,14 +46,25 @@ func (c *Connector) bindAsService(ctx context.Context) (idp.LDAPConn, error) {
 	c.logger.Debug("binding as service account", "endpoint", c.config.Endpoint)
 	conn, err := c.connect(ctx)
 	if err != nil {
+		c.logger.Error("connecting to FreeIPA failed", "endpoint", c.config.Endpoint, "error", err)
 		return nil, fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
 	if err := conn.Bind(c.secrets.ServiceAccountUsername, c.secrets.ServiceAccountPassword); err != nil {
 		_ = conn.Close()
+		c.logger.Error("service account bind failed", "endpoint", c.config.Endpoint, "error", err)
 		return nil, fmt.Errorf("service account bind failed: %w", err)
 	}
 	c.logger.Debug("service account bind successful")
 	return conn, nil
+}
+
+// isLdapInvalidCredentials reports whether err is an LDAP Result Code 49
+// (invalid credentials) bind failure, i.e. the password was simply wrong.
+func isLdapInvalidCredentials(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "LDAP Result Code 49")
 }
 
 // TestConnection verifies that the service account can bind to the directory.
@@ -78,7 +89,7 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 
 	conn, err := c.connect(ctx)
 	if err != nil {
-		c.logger.Debug("connection failed during authenticate", "user", user, "error", err)
+		c.logger.Error("connection failed during authenticate", "user", user, "error", err)
 		return fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
@@ -87,7 +98,14 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 	c.logger.Debug("binding as user", "user_dn", userDN)
 
 	if err := conn.Bind(userDN, password); err != nil {
-		c.logger.Debug("bind failed during authenticate", "user", user, "user_dn", userDN, "error", err)
+		// Invalid credentials are an expected outcome of a bad password, not an
+		// application error, so they stay at DEBUG. Anything else (e.g. the
+		// directory being unreachable or misconfigured) is a real error.
+		if isLdapInvalidCredentials(err) {
+			c.logger.Debug("bind failed during authenticate", "user", user, "user_dn", userDN, "error", err)
+		} else {
+			c.logger.Error("bind failed during authenticate", "user", user, "user_dn", userDN, "error", err)
+		}
 		return fmt.Errorf("authentication failed for %q: %w", user, err)
 	}
 
@@ -102,6 +120,7 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 	c.logger.Debug("changing password", "user", user)
 	conn, err := c.connect(ctx)
 	if err != nil {
+		c.logger.Error("connecting to FreeIPA failed", "user", user, "error", err)
 		return fmt.Errorf("connecting to FreeIPA: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
@@ -330,17 +349,24 @@ func (c *Connector) GetUserAttribute(ctx context.Context, userDN, attr string) (
 
 // buildUserDN constructs a user DN from a username. If the user string already
 // contains "=", it is assumed to be a full DN and returned as-is.
-// Otherwise the username is RFC 4514-escaped before being interpolated so that
-// special characters (`,` `+` `"` `\` `<` `>` `;`) cannot corrupt the DN.
+// Otherwise any "@domain" suffix is stripped (so UPN/email-style logins like
+// "user@example.com" resolve to uid "user", consistent with how the AD
+// connector resolves UPNs), and the remaining username is RFC 4514-escaped
+// before being interpolated so that special characters (`,` `+` `"` `\` `<`
+// `>` `;`) cannot corrupt the DN.
 func (c *Connector) buildUserDN(user string) string {
 	if strings.Contains(user, "=") {
 		return user
+	}
+	username := user
+	if idx := strings.Index(user, "@"); idx > 0 {
+		username = user[:idx]
 	}
 	searchBase := c.config.UserSearchBase
 	if searchBase == "" {
 		searchBase = c.config.BaseDN
 	}
-	return fmt.Sprintf("uid=%s,%s", escapeDNValue(user), searchBase)
+	return fmt.Sprintf("uid=%s,%s", escapeDNValue(username), searchBase)
 }
 
 // escapeDNValue escapes a string for use as an attribute value inside an LDAP

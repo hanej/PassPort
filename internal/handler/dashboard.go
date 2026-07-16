@@ -10,6 +10,7 @@ import (
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/idp"
 )
@@ -34,6 +35,7 @@ type DashboardHandler struct {
 	renderer   *Renderer
 	audit      *audit.Logger
 	logger     *slog.Logger
+	crypto     *crypto.Service
 }
 
 // NewDashboardHandler creates a new DashboardHandler.
@@ -42,12 +44,14 @@ func NewDashboardHandler(
 	sessions *auth.SessionManager,
 	registry *idp.Registry,
 	correlator CorrelatorInterface,
+	cryptoSvc *crypto.Service,
 	renderer *Renderer,
 	auditLogger *audit.Logger,
 	logger *slog.Logger,
 ) *DashboardHandler {
 	return &DashboardHandler{
 		store:      store,
+		crypto:     cryptoSvc,
 		sessions:   sessions,
 		registry:   registry,
 		correlator: correlator,
@@ -294,6 +298,21 @@ func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 		Details:    "Password changed successfully",
 	})
 
+	// Best-effort notification email. Failure here must not affect the
+	// already-successful password change; sendPasswordEventEmail logs
+	// everything it needs on its own.
+	providerName := idpID
+	if idpRecord, err := h.store.GetIDP(r.Context(), idpID); err == nil && idpRecord != nil {
+		providerName = idpRecord.FriendlyName
+	}
+	userEmail, err := resolveNotificationEmailByDN(r.Context(), h.store, provider, idpID, mapping.TargetAccountDN)
+	if err != nil {
+		h.logger.Warn("could not resolve notification email address",
+			"idp_id", idpID, "username", sess.Username, "error", err)
+	}
+	sendPasswordEventEmail(r.Context(), h.store, h.crypto, h.logger,
+		"password_changed", idpID, providerName, sess.Username, userEmail, r.RemoteAddr)
+
 	h.sessions.SetFlash(w, r, "success", "Password changed successfully")
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
 }
@@ -315,7 +334,7 @@ func (h *DashboardHandler) PublicIDPStatus(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := provider.TestConnection(r.Context()); err != nil {
-		h.logger.Debug("IDP status check: connection failed", "idp_id", idpID, "error", err)
+		h.logger.Error("IDP status check: connection failed", "idp_id", idpID, "error", err)
 		h.renderer.JSON(w, http.StatusOK, map[string]string{"status": "offline"})
 		return
 	}
@@ -350,7 +369,7 @@ func (h *DashboardHandler) IDPStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := provider.TestConnection(r.Context()); err != nil {
-		h.logger.Debug("IDP status check: connection failed",
+		h.logger.Error("IDP status check: connection failed",
 			"idp_id", idpID,
 			"error", err,
 		)

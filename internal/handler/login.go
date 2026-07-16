@@ -257,7 +257,10 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 		dn, dnErr = provider.SearchUser(r.Context(), "sAMAccountName", username)
 	}
 	if dnErr != nil {
-		h.logger.Debug("could not resolve user DN for self-mapping",
+		// The user just authenticated successfully, so their account definitely
+		// exists; failing to find it here indicates a directory search
+		// misconfiguration (e.g. wrong search base), not a user error.
+		h.logger.Warn("could not resolve user DN for self-mapping",
 			"provider_id", providerID,
 			"username", username,
 			"error", dnErr,

@@ -2,6 +2,7 @@ package ad
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -47,10 +48,12 @@ func (c *Connector) bindAsService(ctx context.Context) (idp.LDAPConn, error) {
 	c.logger.Debug("binding as service account", "endpoint", c.config.Endpoint)
 	conn, err := c.connect(ctx)
 	if err != nil {
+		c.logger.Error("connecting to AD failed", "endpoint", c.config.Endpoint, "error", err)
 		return nil, fmt.Errorf("connecting to AD: %w", err)
 	}
 	if err := conn.Bind(c.secrets.ServiceAccountUsername, c.secrets.ServiceAccountPassword); err != nil {
 		_ = conn.Close()
+		c.logger.Error("service account bind failed", "endpoint", c.config.Endpoint, "error", err)
 		return nil, fmt.Errorf("service account bind failed: %w", err)
 	}
 	c.logger.Debug("service account bind successful")
@@ -128,23 +131,36 @@ func (c *Connector) Authenticate(ctx context.Context, user, password string) err
 	// Resolve bare usernames to a DN so AD accepts the bind.
 	bindDN, err := c.resolveUserDN(ctx, user)
 	if err != nil {
-		c.logger.Debug("failed to resolve user DN for auth", "user", user, "error", err)
+		if strings.Contains(err.Error(), "user not found") || errors.Is(err, idp.ErrMultipleMatches) {
+			c.logger.Debug("failed to resolve user DN for auth", "user", user, "error", err)
+		} else {
+			c.logger.Error("failed to resolve user DN for auth", "user", user, "error", err)
+		}
 		return fmt.Errorf("authentication failed for %q: could not resolve user: %w", user, err)
 	}
 	c.logger.Debug("resolved bind DN", "user", user, "bind_dn", bindDN)
 
 	conn, err := c.connect(ctx)
 	if err != nil {
-		c.logger.Debug("connection failed during authenticate", "user", user, "error", err)
+		c.logger.Error("connection failed during authenticate", "user", user, "error", err)
 		return fmt.Errorf("connecting to AD: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	if err := conn.Bind(bindDN, password); err != nil {
-		c.logger.Debug("bind failed during authenticate", "user", user, "bind_dn", bindDN, "error", err)
+		// Invalid credentials and known account-state errors (locked, disabled,
+		// expired, must-change) are expected outcomes of a user typo/bad password,
+		// not application errors, so they stay at DEBUG. Anything else (e.g. the
+		// directory being unreachable or misconfigured) is a real error.
 		if mapped := mapLdapBindError(err); mapped != nil {
+			c.logger.Debug("bind failed during authenticate", "user", user, "bind_dn", bindDN, "error", err)
 			return mapped
 		}
+		if isLdapInvalidCredentials(err) {
+			c.logger.Debug("bind failed during authenticate", "user", user, "bind_dn", bindDN, "error", err)
+			return fmt.Errorf("authentication failed for %q: %w", user, err)
+		}
+		c.logger.Error("bind failed during authenticate", "user", user, "bind_dn", bindDN, "error", err)
 		return fmt.Errorf("authentication failed for %q: %w", user, err)
 	}
 
@@ -167,6 +183,7 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 
 	conn, err := c.connect(ctx)
 	if err != nil {
+		c.logger.Error("connecting to AD failed", "user", user, "error", err)
 		return fmt.Errorf("connecting to AD: %w", err)
 	}
 

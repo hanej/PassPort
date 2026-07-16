@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	csrf "filippo.io/csrf/gorilla"
@@ -74,6 +75,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	} else {
 		r.Use(middleware.ClientIPFromRemoteAddr)
 	}
+	// The ClientIPFrom* middleware above only records the resolved IP in the
+	// request context (read via middleware.GetClientIP) — unlike chi's old
+	// RealIP middleware, it does not mutate r.RemoteAddr. Every other part of
+	// the app (audit logging, rate limiting, session IP recording) reads
+	// r.RemoteAddr directly, so mirror the resolved IP back into it here.
+	// This is the single point where the trust_proxy setting takes effect for
+	// the rest of the application.
+	r.Use(mirrorResolvedClientIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(cfg.Logger))
@@ -274,9 +283,29 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	return r
 }
 
+// mirrorResolvedClientIP overwrites r.RemoteAddr with the client IP resolved
+// by the preceding ClientIPFrom* middleware (middleware.GetClientIP), so that
+// every downstream consumer that reads r.RemoteAddr directly — audit logging,
+// rate limiting, session IP recording — automatically honors the trust_proxy
+// configuration without each of them needing to know about request context
+// or X-Forwarded-For at all. IPv6 addresses are bracketed so the result stays
+// parseable by net.SplitHostPort.
+func mirrorResolvedClientIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ip := middleware.GetClientIP(r.Context()); ip != "" {
+			if strings.Contains(ip, ":") {
+				r.RemoteAddr = "[" + ip + "]:0"
+			} else {
+				r.RemoteAddr = ip + ":0"
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // requestLogger returns middleware that logs each request with its client IP,
-// method, path, status code, and duration. The RealIP middleware must run
-// before this so that r.RemoteAddr reflects X-Forwarded-For when present.
+// method, path, status code, and duration. mirrorResolvedClientIP must run
+// before this so that r.RemoteAddr reflects the resolved client IP.
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

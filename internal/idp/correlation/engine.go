@@ -304,7 +304,7 @@ func (e *Engine) attemptAutoCorrelation(ctx context.Context, authProviderID, aut
 	// Step 5: Resolve the canonical attribute value from the auth provider.
 	canonicalValue, err := e.ResolveCanonicalAttribute(ctx, authProviderID, authUsername, rule.SourceCanonicalAttr)
 	if err != nil {
-		e.logger.Debug("failed to resolve canonical attribute",
+		e.logger.Warn("failed to resolve canonical attribute",
 			"target_idp", target.ID,
 			"canonical_attr", rule.SourceCanonicalAttr,
 			"error", err,
@@ -323,7 +323,7 @@ func (e *Engine) attemptAutoCorrelation(ctx context.Context, authProviderID, aut
 	// explicitly stored TargetDirectoryAttr if set.
 	targetDirAttr, err := e.resolveTargetDirectoryAttr(ctx, target.ID, rule)
 	if err != nil {
-		e.logger.Debug("failed to resolve target directory attribute",
+		e.logger.Warn("failed to resolve target directory attribute",
 			"target_idp", target.ID,
 			"canonical_attr", rule.SourceCanonicalAttr,
 			"error", err,

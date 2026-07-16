@@ -15,6 +15,7 @@ import (
 
 	csrf "filippo.io/csrf/gorilla"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
@@ -598,20 +599,23 @@ func TestRateLimit_DifferentIPsHaveIndependentBuckets(t *testing.T) {
 	}
 }
 
-// TestRateLimit_XFFSpoofingBypasses documents the known gap: X-Forwarded-For
-// is trusted without origin validation, allowing per-IP rate limits to be
-// bypassed by rotating the XFF header. This test confirms the current behavior
-// so any future fix is detected as a deliberate change.
-func TestRateLimit_XFFSpoofingBypasses(t *testing.T) {
+// TestRateLimit_XFFSpoofing_DefaultConfigIgnoresXFF verifies the fix for the
+// previously-known gap: without trust_proxy configured (the default), rotating
+// X-Forwarded-For must NOT let a client evade per-IP rate limiting. All
+// requests sharing the same real RemoteAddr are rate-limited together
+// regardless of what X-Forwarded-For claims.
+func TestRateLimit_XFFSpoofing_DefaultConfigIgnoresXFF(t *testing.T) {
 	limiter := ratelimit.NewLimiter(0.0001, 1, testLogger())
 
 	r := chi.NewRouter()
+	r.Use(middleware.ClientIPFromRemoteAddr) // trust_proxy: false
+	r.Use(mirrorResolvedClientIP)
 	r.Use(ratelimit.Middleware(limiter, ratelimit.KeyByIP))
 	r.Post("/login", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Same real RemoteAddr but different X-Forwarded-For values each time.
+	// Same real RemoteAddr but a different spoofed X-Forwarded-For each time.
 	spoofedIPs := []string{"10.0.1.1", "10.0.1.2", "10.0.1.3", "10.0.1.4", "10.0.1.5"}
 	for i, ip := range spoofedIPs {
 		req := httptest.NewRequest(http.MethodPost, "/login", nil)
@@ -619,10 +623,64 @@ func TestRateLimit_XFFSpoofingBypasses(t *testing.T) {
 		req.Header.Set("X-Forwarded-For", ip)
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
-		// Each spoofed IP gets its own bucket, so all pass.
-		if rec.Code != http.StatusOK {
-			t.Logf("XFF spoof attempt %d (IP=%s) got %d (rate limited — XFF spoofing mitigation may be in place)", i+1, ip, rec.Code)
+
+		if i == 0 {
+			if rec.Code != http.StatusOK {
+				t.Fatalf("first request should pass (uses the single token), got %d", rec.Code)
+			}
+			continue
 		}
+		if rec.Code != http.StatusTooManyRequests {
+			t.Errorf("spoof attempt %d (XFF=%s) got %d, want 429 (XFF must be ignored)", i+1, ip, rec.Code)
+		}
+	}
+}
+
+// TestRateLimit_TrustProxy_HonorsRealProxyXFF verifies that when trust_proxy
+// is enabled, the client IP is correctly resolved from the hop actually
+// appended by the trusted reverse proxy — not from any value the client
+// injected into the header itself — so distinct real clients still get
+// independent rate-limit buckets.
+func TestRateLimit_TrustProxy_HonorsRealProxyXFF(t *testing.T) {
+	limiter := ratelimit.NewLimiter(0.0001, 1, testLogger())
+
+	r := chi.NewRouter()
+	r.Use(middleware.ClientIPFromXFFTrustedProxies(1)) // trust_proxy: true
+	r.Use(mirrorResolvedClientIP)
+	r.Use(ratelimit.Middleware(limiter, ratelimit.KeyByIP))
+	r.Post("/login", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Client A: forges a first hop, but the trusted proxy appends the real
+	// peer IP it saw (99.99.99.1) as the rightmost, trusted entry.
+	reqA := httptest.NewRequest(http.MethodPost, "/login", nil)
+	reqA.RemoteAddr = "127.0.0.1:9000" // request arrives from the proxy itself
+	reqA.Header.Set("X-Forwarded-For", "forged-attacker-value, 99.99.99.1")
+	recA := httptest.NewRecorder()
+	r.ServeHTTP(recA, reqA)
+	if recA.Code != http.StatusOK {
+		t.Fatalf("client A first request should pass, got %d", recA.Code)
+	}
+
+	// Same client A retries — same trusted (rightmost) IP — should now be limited.
+	reqA2 := httptest.NewRequest(http.MethodPost, "/login", nil)
+	reqA2.RemoteAddr = "127.0.0.1:9000"
+	reqA2.Header.Set("X-Forwarded-For", "different-forged-value, 99.99.99.1")
+	recA2 := httptest.NewRecorder()
+	r.ServeHTTP(recA2, reqA2)
+	if recA2.Code != http.StatusTooManyRequests {
+		t.Errorf("client A retry (forged first hop changed, real hop unchanged) should still be limited, got %d", recA2.Code)
+	}
+
+	// Client B: a different real peer IP as seen by the trusted proxy — independent bucket.
+	reqB := httptest.NewRequest(http.MethodPost, "/login", nil)
+	reqB.RemoteAddr = "127.0.0.1:9000"
+	reqB.Header.Set("X-Forwarded-For", "forged-attacker-value, 99.99.99.2")
+	recB := httptest.NewRecorder()
+	r.ServeHTTP(recB, reqB)
+	if recB.Code != http.StatusOK {
+		t.Errorf("client B (different real IP) should have its own bucket, got %d", recB.Code)
 	}
 }
 

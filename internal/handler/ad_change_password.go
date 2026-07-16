@@ -10,6 +10,7 @@ import (
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
+	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
 	"github.com/hanej/passport/internal/idp"
 )
@@ -22,6 +23,7 @@ type ADChangePasswordHandler struct {
 	logger   *slog.Logger
 	registry *idp.Registry
 	store    db.Store
+	crypto   *crypto.Service
 }
 
 func NewADChangePasswordHandler(
@@ -31,6 +33,7 @@ func NewADChangePasswordHandler(
 	logger *slog.Logger,
 	registry *idp.Registry,
 	store db.Store,
+	cryptoSvc *crypto.Service,
 ) *ADChangePasswordHandler {
 	return &ADChangePasswordHandler{
 		sessions: sessions,
@@ -39,6 +42,7 @@ func NewADChangePasswordHandler(
 		logger:   logger,
 		registry: registry,
 		store:    store,
+		crypto:   cryptoSvc,
 	}
 }
 
@@ -145,6 +149,20 @@ func (h *ADChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.
 		Result:    audit.ResultSuccess,
 		Details:   "AD forced password change completed",
 	})
+
+	// Best-effort notification email. Failure here must not affect the
+	// already-successful password change.
+	providerName := sess.ProviderID
+	if idpRecord, idpErr := h.store.GetIDP(r.Context(), sess.ProviderID); idpErr == nil && idpRecord != nil {
+		providerName = idpRecord.FriendlyName
+	}
+	userEmail, emailErr := resolveNotificationEmailByUsername(r.Context(), h.store, h.registry, sess.ProviderID, sess.Username)
+	if emailErr != nil {
+		h.logger.Warn("could not resolve notification email address",
+			"idp_id", sess.ProviderID, "username", sess.Username, "error", emailErr)
+	}
+	sendPasswordEventEmail(r.Context(), h.store, h.crypto, h.logger,
+		"password_changed", sess.ProviderID, providerName, sess.Username, userEmail, r.RemoteAddr)
 
 	h.sessions.SetFlash(w, r, "success", "Password changed successfully.")
 	http.Redirect(w, r, "/dashboard", http.StatusFound)

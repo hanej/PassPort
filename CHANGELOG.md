@@ -6,8 +6,27 @@ All notable changes to PassPort are documented in this file.
 
 ## [Unreleased]
 
+## [v1.1.9] - 2026-07-16
+
 ### Added
 - **`-example-config` CLI flag** — PassPort can now print a built-in example `config.yaml` to stdout and exit. The sample configuration is embedded from `cmd/passport/config.yaml.example`, making it easy to generate a starting config without copying from documentation.
+
+### Fixed
+- **FreeIPA connector did not accept email/UPN-style usernames** — Unlike the AD connector, `buildUserDN` did not strip an `@domain` suffix, so logging in or linking an account with `user@example.com` against a FreeIPA-backed provider constructed an incorrect DN (`uid=user@example.com,...`) and failed even with the correct password. FreeIPA now strips the domain suffix the same way AD does, fixing this for login, account linking, password changes, resets, and account unlock/enable.
+- **Password change/reset notification emails were never sent** — The `password_changed` and `password_reset` email templates existed and were configurable, but no code path ever actually sent them: dashboard password changes, forced AD password changes, and self-service forgot-password resets all completed successfully without triggering an email. Added a shared notification helper that resolves the user's notification email attribute from their IDP and sends the appropriate templated email after each successful password change or reset. Failures to send (SMTP not configured, template missing, etc.) are logged but never block the already-successful password operation.
+
+### Removed
+- **`account_locked` / `account_unlocked` email templates** — These templates were never wired up to any feature; no account lockout detection or admin unlock action exists in the app. Removed from the admin email template list and deleted any seeded/customized rows via migration.
+- **`forgot_password` email template** — Superseded by `password_reset`. The self-service reset flow generates a temporary password internally to satisfy directory bind requirements but never emails it or shows it to the user, so this template was never sent by any code path. Removed from the admin email template list, deleted any seeded/customized rows via migration, and removed the corresponding dead "Current (Temporary) Password" field markup from the reset password page.
+
+### Security
+- **Rate limiting and session IP logging could be bypassed by spoofing `X-Forwarded-For`** — `ratelimit.KeyByIP` and the session manager's client IP lookup both trusted a client-supplied `X-Forwarded-For` header unconditionally, regardless of the `trust_proxy` setting. A client could rotate this header on every request to evade per-IP rate limiting and to forge the source IP recorded against its own sessions and audit entries, even when PassPort was not deployed behind a reverse proxy. Both now derive the client IP solely from the resolved connection address.
+- **`trust_proxy`-aware client IP resolution was silently broken by the chi v5.3.1 upgrade** — Bumping `go-chi/chi` replaced the deprecated `middleware.RealIP` (which rewrote `r.RemoteAddr`) with `middleware.ClientIPFromXFFTrustedProxies`/`ClientIPFromRemoteAddr`, which only store the resolved IP in the request context. Nothing in the app read that context value, so the `trust_proxy` middleware was effectively dead code and every downstream consumer (audit logging, rate limiting, session IP recording) kept reading the raw, unresolved `r.RemoteAddr`. Added a `mirrorResolvedClientIP` middleware that copies the resolved client IP back onto `r.RemoteAddr` so `trust_proxy: true` now correctly and exclusively trusts one hop of `X-Forwarded-For` from the immediate upstream proxy, everywhere in the app.
+- **Go toolchain updated to 1.26.5** and dependencies refreshed: `go-chi/chi` v5.2.5 → v5.3.1, `goldmark` v1.8.2 → v1.8.4, `golang.org/x/crypto` v0.49.0 → v0.54.0, `golang.org/x/sys` v0.42.0 → v0.47.0, `modernc.org/sqlite` v1.48.0 → v1.53.0, `modernc.org/libc` v1.70.0 → v1.73.4.
+
+### Improved
+- **AD/FreeIPA connector logging now distinguishes real errors from expected auth outcomes** — Connection failures, service account bind failures, and unexpected bind errors are now logged at `ERROR` instead of `DEBUG`. Expected outcomes (wrong password, locked/disabled/expired account, must-change-password) remain at `DEBUG` since they are normal user-facing conditions, not application errors.
+- **More unexpected failures now logged at `WARN`/`ERROR` instead of `DEBUG`** — IDP connectivity checks on the dashboard (`ERROR`, since they always use the service account and never fail due to user error); failure to resolve a user's DN for self-mapping right after a successful login (`WARN`); auto-correlation attribute resolution failures (`WARN`); failure to load, decrypt, or parse saved IDP secrets during connection testing (`WARN`); and requests for a nonexistent email template type (`WARN`). Routine, expected outcomes (wrong password/OTP, form validation errors, user-not-found lookups) remain at `DEBUG`.
 
 ## [v1.1.8] - 2026-06-29
 

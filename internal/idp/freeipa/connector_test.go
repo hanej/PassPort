@@ -134,6 +134,25 @@ func TestAuthenticate_Success(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_Success_UPNStyle(t *testing.T) {
+	// "jdoe@example.com" should strip the domain and bind as uid=jdoe,...,
+	// consistent with how the AD connector resolves UPNs.
+	mock := &mockLDAPConn{
+		bindFunc: func(username, password string) error {
+			if username == "uid=jdoe,cn=users,cn=accounts,dc=example,dc=com" && password == "user-pass" {
+				return nil
+			}
+			return fmt.Errorf("invalid credentials")
+		},
+	}
+	c := newTestConnector(mock)
+
+	err := c.Authenticate(context.Background(), "jdoe@example.com", "user-pass")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
 func TestAuthenticate_Failure(t *testing.T) {
 	mock := &mockLDAPConn{
 		bindFunc: func(_, _ string) error {
@@ -608,6 +627,16 @@ func TestBuildUserDN(t *testing.T) {
 			name:     "custom DN with equals",
 			user:     "cn=John Doe,ou=Special,dc=example,dc=com",
 			expected: "cn=John Doe,ou=Special,dc=example,dc=com",
+		},
+		{
+			name:     "UPN/email style strips domain",
+			user:     "jdoe@example.com",
+			expected: "uid=jdoe,cn=users,cn=accounts,dc=example,dc=com",
+		},
+		{
+			name:     "leading @ is not stripped",
+			user:     "@example.com",
+			expected: "uid=@example.com,cn=users,cn=accounts,dc=example,dc=com",
 		},
 	}
 

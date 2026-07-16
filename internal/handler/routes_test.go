@@ -71,8 +71,8 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 	cfg := RouterConfig{
 		Health:              NewHealthHandler(database, logger),
 		Login:               NewLoginHandler(database, sm, registry, correlator, cryptoSvc, renderer, auditLog, logger),
-		ForgotPassword:      NewForgotPasswordHandler(database, registry, sm, renderer, auditLog, logger),
-		Dashboard:           NewDashboardHandler(database, sm, registry, correlator, renderer, auditLog, logger),
+		ForgotPassword:      NewForgotPasswordHandler(database, registry, cryptoSvc, sm, renderer, auditLog, logger),
+		Dashboard:           NewDashboardHandler(database, sm, registry, correlator, cryptoSvc, renderer, auditLog, logger),
 		Link:                NewLinkHandler(database, sm, registry, renderer, auditLog, logger),
 		Bootstrap:           NewBootstrapHandler(database, sm, renderer, auditLog, auth.PasswordPolicy{}, logger),
 		AdminIDP:            NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLog, logger, uploadsPath),

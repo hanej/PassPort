@@ -20,13 +20,10 @@ import (
 // templateVariables defines available template variables per template type.
 var templateVariables = map[string][]string{
 	"smtp_test":               {"Timestamp"},
-	"forgot_password":         {"Username", "ProviderName", "TempPassword", "Timestamp"},
 	"password_changed":        {"Username", "ProviderName", "Timestamp", "IPAddress"},
 	"password_reset":          {"Username", "ProviderName", "Timestamp"},
 	"password_expiration":     {"Username", "ProviderName", "ExpirationDate", "DaysRemaining"},
 	"password_expired":        {"Username", "ProviderName", "ExpirationDate", "DaysExpired"},
-	"account_locked":          {"Username", "ProviderName", "Timestamp", "Reason"},
-	"account_unlocked":        {"Username", "ProviderName", "Timestamp"},
 	"expiration_report":       {"ProviderName", "GeneratedDate", "AccountCount", "ReportTable"},
 	"expired_accounts_report": {"ProviderName", "GeneratedDate", "AccountCount", "ReportTable"},
 }
@@ -34,13 +31,10 @@ var templateVariables = map[string][]string{
 // templateNames maps template types to human-friendly names.
 var templateNames = map[string]string{
 	"smtp_test":               "SMTP Test Email",
-	"forgot_password":         "Forgot Password",
 	"password_changed":        "Password Changed",
 	"password_reset":          "Password Reset",
 	"password_expiration":     "Password Expiration Warning (Default)",
 	"password_expired":        "Password Expired Notice (Default)",
-	"account_locked":          "Account Locked",
-	"account_unlocked":        "Account Unlocked",
 	"expiration_report":       "Soon-to-Expire Passwords Report (Default)",
 	"expired_accounts_report": "Expired Accounts Report (Default)",
 }
@@ -81,10 +75,6 @@ var defaultTemplates = map[string]struct {
 		Subject:  "PassPort Test Email",
 		BodyHTML: `<h2>PassPort Test Email</h2><p>This is a test email from <strong>PassPort</strong>.</p><p>If you received this message, your SMTP configuration is working correctly.</p><p>Sent at: {{.Timestamp}}</p><p>— PassPort</p>`,
 	},
-	"forgot_password": {
-		Subject:  "Password Reset Initiated",
-		BodyHTML: `<h2>Password Reset</h2><p>Hello {{.Username}},</p><p>A password reset has been initiated for your <strong>{{.ProviderName}}</strong> account on {{.Timestamp}}.</p><p>Your temporary password is: <strong>{{.TempPassword}}</strong></p><p>Please use this temporary password to complete your password reset. It will only be valid for a single use.</p><p>If you did not request this reset, please contact your administrator immediately.</p><p>— PassPort</p>`,
-	},
 	"password_changed": {
 		Subject:  "Your password has been changed",
 		BodyHTML: `<h2>Password Changed</h2><p>Hello {{.Username}},</p><p>Your password for <strong>{{.ProviderName}}</strong> was successfully changed on {{.Timestamp}}.</p><p>If you did not make this change, please contact your administrator immediately.</p><p>— PassPort</p>`,
@@ -96,14 +86,6 @@ var defaultTemplates = map[string]struct {
 	"password_expiration": {
 		Subject:  "Your password is expiring soon",
 		BodyHTML: `<h2>Password Expiration Notice</h2><p>Hello {{.Username}},</p><p>Your password for <strong>{{.ProviderName}}</strong> will expire on <strong>{{.ExpirationDate}}</strong> ({{.DaysRemaining}} days remaining).</p><p>Please change your password before it expires to avoid service interruption.</p><p>— PassPort</p>`,
-	},
-	"account_locked": {
-		Subject:  "Your account has been locked",
-		BodyHTML: `<h2>Account Locked</h2><p>Hello {{.Username}},</p><p>Your <strong>{{.ProviderName}}</strong> account was locked on {{.Timestamp}}.</p><p>Reason: {{.Reason}}</p><p>Please contact your administrator for assistance.</p><p>— PassPort</p>`,
-	},
-	"account_unlocked": {
-		Subject:  "Your account has been unlocked",
-		BodyHTML: `<h2>Account Unlocked</h2><p>Hello {{.Username}},</p><p>Your <strong>{{.ProviderName}}</strong> account has been unlocked as of {{.Timestamp}}.</p><p>You may now log in normally.</p><p>— PassPort</p>`,
 	},
 	"expiration_report": {
 		Subject:  "Soon-to-Expire Passwords Report - {{.ProviderName}}",
@@ -232,7 +214,7 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 			idpID := strings.TrimPrefix(templateType, base+":")
 			friendlyName = templateNames[base] + " — " + idpID
 		} else {
-			h.logger.Debug("invalid template type", "type", templateType)
+			h.logger.Warn("invalid template type", "type", templateType)
 			h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
 			return
 		}
@@ -296,7 +278,7 @@ func (h *AdminEmailTemplatesHandler) Save(w http.ResponseWriter, r *http.Request
 	// Validate type: either in the global list, a per-IDP password_expiration template,
 	// a per-IDP password_expired template, or a per-IDP report template.
 	if _, ok := templateVariables[templateType]; !ok && !IsPasswordExpirationTemplate(templateType) && !IsPasswordExpiredTemplate(templateType) && !IsReportTemplate(templateType) {
-		h.logger.Debug("invalid template type on save", "type", templateType)
+		h.logger.Warn("invalid template type on save", "type", templateType)
 		h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
 		return
 	}
@@ -410,8 +392,6 @@ func (h *AdminEmailTemplatesHandler) Preview(w http.ResponseWriter, r *http.Requ
 		"ExpirationDate": time.Now().Local().Add(7 * 24 * time.Hour).Format("Jan 2, 2006"),
 		"DaysRemaining":  "7",
 		"DaysExpired":    "3",
-		"TempPassword":   "Temp@1234!",
-		"Reason":         "Too many failed login attempts",
 		"GeneratedDate":  time.Now().Local().Format("Jan 2, 2006 3:04 PM MST"),
 		"AccountCount":   "12",
 		"ReportTable":    "<em>(report table rendered here)</em>",
@@ -474,7 +454,7 @@ func (h *AdminEmailTemplatesHandler) ResetDefault(w http.ResponseWriter, r *http
 
 	def, ok := defaultTemplates[templateType]
 	if !ok {
-		h.logger.Debug("invalid template type on reset", "type", templateType)
+		h.logger.Warn("invalid template type on reset", "type", templateType)
 		h.renderer.RenderError(w, r, http.StatusNotFound, "Template not found")
 		return
 	}
