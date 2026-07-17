@@ -218,39 +218,70 @@ func TestSendHTML_PlainSMTP(t *testing.T) {
 	}
 }
 
-// TestSendHTML_StripsHeaderInjection verifies that CR/LF sequences embedded
-// in the subject or recipient (e.g. from a directory attribute or an
-// admin-editable email template) cannot be used to inject additional email
-// headers or split the message (CWE-93 email header injection).
-func TestSendHTML_StripsHeaderInjection(t *testing.T) {
-	var captured strings.Builder
-	addr, stop := fakeSMTPServer(t, &captured)
+// TestSendHTML_RejectsHeaderInjection verifies that CR/LF sequences
+// embedded in the subject, recipient, or from name/address (e.g. from a
+// directory attribute or an admin-editable email template) are rejected
+// rather than sent, preventing injection of additional email headers or a
+// split message (CWE-93 email header injection).
+func TestSendHTML_RejectsHeaderInjection(t *testing.T) {
+	addr, stop := fakeSMTPServer(t)
 	defer stop()
 
 	host, port, _ := net.SplitHostPort(addr)
-	cfg := Config{
+	baseCfg := Config{
 		Host:        host,
 		Port:        port,
 		FromAddress: "from@example.com",
 		FromName:    "Test Sender",
 	}
 
-	maliciousSubject := "Hello\r\nBcc: attacker@evil.com"
-	maliciousTo := "victim@example.com\r\nBcc: attacker2@evil.com"
-
-	if err := SendHTML(cfg, maliciousTo, maliciousSubject, "<p>Hello</p>"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name    string
+		cfg     Config
+		to      string
+		subject string
+	}{
+		{
+			name:    "malicious subject",
+			cfg:     baseCfg,
+			to:      "victim@example.com",
+			subject: "Hello\r\nBcc: attacker@evil.com",
+		},
+		{
+			name:    "malicious to",
+			cfg:     baseCfg,
+			to:      "victim@example.com\r\nBcc: attacker2@evil.com",
+			subject: "Hello",
+		},
+		{
+			name: "malicious from name",
+			cfg: Config{
+				Host: host, Port: port,
+				FromAddress: "from@example.com",
+				FromName:    "Evil\r\nBcc: attacker3@evil.com",
+			},
+			to:      "victim@example.com",
+			subject: "Hello",
+		},
+		{
+			name: "malicious from address",
+			cfg: Config{
+				Host: host, Port: port,
+				FromAddress: "from@example.com\r\nBcc: attacker4@evil.com",
+				FromName:    "Test Sender",
+			},
+			to:      "victim@example.com",
+			subject: "Hello",
+		},
 	}
 
-	msg := captured.String()
-	if strings.Contains(msg, "\r\nBcc:") {
-		t.Errorf("injected Bcc header was not stripped, message:\n%s", msg)
-	}
-	if !strings.Contains(msg, "Subject: HelloBcc: attacker@evil.com") {
-		t.Errorf("expected sanitized subject line, got message:\n%s", msg)
-	}
-	if !strings.Contains(msg, "To: victim@example.comBcc: attacker2@evil.com") {
-		t.Errorf("expected sanitized To line, got message:\n%s", msg)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := SendHTML(tt.cfg, tt.to, tt.subject, "<p>Hello</p>")
+			if err == nil {
+				t.Fatal("expected an error for CR/LF in header value, got nil")
+			}
+		})
 	}
 }
 

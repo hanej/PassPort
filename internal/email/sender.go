@@ -23,16 +23,19 @@ type Config struct {
 	Password      string
 }
 
-// sanitizeHeader strips CR and LF characters from a value before it is
-// interpolated into a raw email header. Without this, a subject line,
-// recipient address, or display name containing an embedded "\r\n" (e.g.
-// from a directory attribute or admin-editable template) could inject
-// additional headers such as "Bcc:" or override "Content-Type:", or split
-// the message into unintended parts (CWE-93 header injection).
-func sanitizeHeader(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\n", "")
-	return s
+// validateHeaderValue rejects a value that is about to be interpolated into
+// a raw email header if it contains an embedded CR or LF character. Without
+// this check, a subject line, recipient address, or display name pulled
+// from a directory attribute or an admin-editable template could inject
+// additional headers such as "Bcc:", override "Content-Type:", or split
+// the message into attacker-controlled parts (CWE-93 email header
+// injection). Rejecting outright (rather than silently stripping) ensures
+// malformed/malicious input is surfaced as an error instead of being sent.
+func validateHeaderValue(name, s string) error {
+	if strings.ContainsAny(s, "\r\n") {
+		return fmt.Errorf("invalid %s: contains CR or LF", name)
+	}
+	return nil
 }
 
 // SendHTML sends an HTML email with the given subject, body, and recipient.
@@ -44,10 +47,19 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 		fromName = "PassPort"
 	}
 
-	fromName = sanitizeHeader(fromName)
-	fromAddress := sanitizeHeader(cfg.FromAddress)
-	to = sanitizeHeader(to)
-	subject = sanitizeHeader(subject)
+	if err := validateHeaderValue("from name", fromName); err != nil {
+		return err
+	}
+	if err := validateHeaderValue("from address", cfg.FromAddress); err != nil {
+		return err
+	}
+	if err := validateHeaderValue("to", to); err != nil {
+		return err
+	}
+	if err := validateHeaderValue("subject", subject); err != nil {
+		return err
+	}
+	fromAddress := cfg.FromAddress
 
 	msg := fmt.Sprintf("From: %s <%s>\r\n"+
 		"To: %s\r\n"+
