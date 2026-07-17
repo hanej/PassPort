@@ -8,7 +8,7 @@
             <span aria-hidden="true">&laquo;</span> Previous
         </a>
         <select class="form-select form-select-sm w-auto" aria-label="Select page"
-                onchange="window.location.href='{{.BaseURL}}&page='+this.value">
+                onchange="window.location.href='{{.BaseURL}}&page='+encodeURIComponent(this.value)">
             {{range $page := pages .TotalPages}}
             <option value="{{$page}}"{{if eq $page $.CurrentPage}} selected{{end}}>Page {{$page}} of {{$.TotalPages}}</option>
             {{end}}

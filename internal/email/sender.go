@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/smtp"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,18 @@ type Config struct {
 	Password      string
 }
 
+// sanitizeHeader strips CR and LF characters from a value before it is
+// interpolated into a raw email header. Without this, a subject line,
+// recipient address, or display name containing an embedded "\r\n" (e.g.
+// from a directory attribute or admin-editable template) could inject
+// additional headers such as "Bcc:" or override "Content-Type:", or split
+// the message into unintended parts (CWE-93 header injection).
+func sanitizeHeader(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
+}
+
 // SendHTML sends an HTML email with the given subject, body, and recipient.
 func SendHTML(cfg Config, to, subject, htmlBody string) error {
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
@@ -31,6 +44,11 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 		fromName = "PassPort"
 	}
 
+	fromName = sanitizeHeader(fromName)
+	fromAddress := sanitizeHeader(cfg.FromAddress)
+	to = sanitizeHeader(to)
+	subject = sanitizeHeader(subject)
+
 	msg := fmt.Sprintf("From: %s <%s>\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
@@ -39,7 +57,7 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 		"Content-Type: text/html; charset=UTF-8\r\n"+
 		"\r\n"+
 		"%s\r\n",
-		fromName, cfg.FromAddress, to, subject,
+		fromName, fromAddress, to, subject,
 		time.Now().Format(time.RFC1123Z), htmlBody,
 	)
 
@@ -51,7 +69,7 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 
 	if cfg.UseTLS {
 		// Direct TLS connection (port 465 typically).
-		return sendTLS(addr, cfg.Host, cfg.TLSSkipVerify, auth, cfg.FromAddress, to, []byte(msg))
+		return sendTLS(addr, cfg.Host, cfg.TLSSkipVerify, auth, fromAddress, to, []byte(msg))
 	}
 
 	// Plain SMTP or STARTTLS -- connect plaintext first.
@@ -69,7 +87,7 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 		}
 	}
 
-	return smtpSend(client, auth, cfg.FromAddress, to, []byte(msg))
+	return smtpSend(client, auth, fromAddress, to, []byte(msg))
 }
 
 // sendTLS sends via a direct TLS connection (SMTPS, typically port 465).

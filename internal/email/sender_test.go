@@ -19,11 +19,17 @@ import (
 
 // fakeSMTPServer starts a minimal plaintext SMTP server on a random port.
 // It accepts a single connection, processes one message, then closes.
-func fakeSMTPServer(t *testing.T) (addr string, stop func()) {
+// If capture is non-nil, the raw DATA payload (with dot-stuffing undone) is
+// written to it so tests can inspect the message that was actually sent.
+func fakeSMTPServer(t *testing.T, capture ...*strings.Builder) (addr string, stop func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("starting fake SMTP server: %v", err)
+	}
+	var buf *strings.Builder
+	if len(capture) > 0 {
+		buf = capture[0]
 	}
 	done := make(chan struct{})
 	go func() {
@@ -33,14 +39,14 @@ func fakeSMTPServer(t *testing.T) (addr string, stop func()) {
 			if err != nil {
 				return
 			}
-			go serveOneFakeSMTP(conn)
+			go serveOneFakeSMTP(conn, buf)
 		}
 	}()
 	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
 }
 
 // serveOneFakeSMTP handles a single SMTP session using a bare-bones protocol.
-func serveOneFakeSMTP(conn net.Conn) {
+func serveOneFakeSMTP(conn net.Conn, capture *strings.Builder) {
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	w := bufio.NewWriter(conn)
@@ -79,8 +85,19 @@ func serveOneFakeSMTP(conn net.Conn) {
 				if err != nil {
 					return
 				}
-				if strings.TrimRight(dataLine, "\r\n") == "." {
+				trimmed := strings.TrimRight(dataLine, "\r\n")
+				if trimmed == "." {
 					break
+				}
+				if capture != nil {
+					// Undo SMTP dot-stuffing (a leading ".." on the wire means
+					// a literal line starting with ".").
+					line := trimmed
+					if strings.HasPrefix(line, "..") {
+						line = line[1:]
+					}
+					capture.WriteString(line)
+					capture.WriteString("\r\n")
 				}
 			}
 			send("250 OK: Message queued")
@@ -198,6 +215,42 @@ func TestSendHTML_PlainSMTP(t *testing.T) {
 
 	if err := SendHTML(cfg, "to@example.com", "Test Subject", "<p>Hello</p>"); err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestSendHTML_StripsHeaderInjection verifies that CR/LF sequences embedded
+// in the subject or recipient (e.g. from a directory attribute or an
+// admin-editable email template) cannot be used to inject additional email
+// headers or split the message (CWE-93 email header injection).
+func TestSendHTML_StripsHeaderInjection(t *testing.T) {
+	var captured strings.Builder
+	addr, stop := fakeSMTPServer(t, &captured)
+	defer stop()
+
+	host, port, _ := net.SplitHostPort(addr)
+	cfg := Config{
+		Host:        host,
+		Port:        port,
+		FromAddress: "from@example.com",
+		FromName:    "Test Sender",
+	}
+
+	maliciousSubject := "Hello\r\nBcc: attacker@evil.com"
+	maliciousTo := "victim@example.com\r\nBcc: attacker2@evil.com"
+
+	if err := SendHTML(cfg, maliciousTo, maliciousSubject, "<p>Hello</p>"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	msg := captured.String()
+	if strings.Contains(msg, "\r\nBcc:") {
+		t.Errorf("injected Bcc header was not stripped, message:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Subject: HelloBcc: attacker@evil.com") {
+		t.Errorf("expected sanitized subject line, got message:\n%s", msg)
+	}
+	if !strings.Contains(msg, "To: victim@example.comBcc: attacker2@evil.com") {
+		t.Errorf("expected sanitized To line, got message:\n%s", msg)
 	}
 }
 
@@ -319,7 +372,7 @@ func fakeTLSSMTPServer(t *testing.T) (addr string, stop func()) {
 			if err != nil {
 				return
 			}
-			go serveOneFakeSMTP(conn)
+			go serveOneFakeSMTP(conn, nil)
 		}
 	}()
 	return ln.Addr().String(), func() { _ = ln.Close(); <-done }
