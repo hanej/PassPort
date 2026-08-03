@@ -76,6 +76,7 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 		Link:                NewLinkHandler(database, sm, registry, renderer, auditLog, logger),
 		Bootstrap:           NewBootstrapHandler(database, sm, renderer, auditLog, auth.PasswordPolicy{}, logger),
 		AdminIDP:            NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLog, logger, uploadsPath),
+		AdminIDPGroups:      NewAdminIDPGroupHandler(database, renderer, auditLog, logger),
 		AdminSMTP:           NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLog, logger),
 		AdminGroups:         NewAdminGroupsHandler(database, registry, renderer, auditLog, logger),
 		AdminMappings:       NewAdminMappingsHandler(database, registry, renderer, auditLog, logger),

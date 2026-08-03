@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -59,13 +60,16 @@ func (h *ForgotPasswordHandler) ShowForm(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Weblink providers have no directory and cannot reset passwords.
+	directoryOnly := directoryIDPs(idps)
+
 	flash := h.sessions.GetFlash(r)
 
 	h.renderer.Render(w, r, "forgot_password.html", PageData{
 		Title: "Forgot Password",
 		Flash: flash,
 		Data: map[string]any{
-			"IDPs": idps,
+			"IDPs": directoryOnly,
 		},
 	})
 }
@@ -192,21 +196,35 @@ func (h *ForgotPasswordHandler) ShowReset(w http.ResponseWriter, r *http.Request
 
 	flash := h.sessions.GetFlash(r)
 
+	data := map[string]any{
+		"Username":       sess.Username,
+		"IDPName":        idpName,
+		"ComplexityHint": complexityHint,
+	}
+	// Best effort: the directory stays the authority, so an unreadable policy just
+	// leaves the form without client-side rules rather than blocking the user.
+	if provider, ok := h.registry.Get(sess.ProviderID); ok {
+		if reader, isReader := provider.(idp.PasswordPolicyReader); isReader {
+			if dirPolicy, err := reader.ResolvePasswordPolicy(r.Context(), sess.Username); err == nil {
+				data["PasswordPolicy"] = dirPolicy
+			} else {
+				h.logger.Warn("could not read password policy for display",
+					"username", sess.Username, "error", err)
+			}
+		}
+	}
+
 	h.renderer.Render(w, r, "reset_password.html", PageData{
 		Title: "Reset Password",
 		Flash: flash,
-		Data: map[string]any{
-			"Username":       sess.Username,
-			"IDPName":        idpName,
-			"ComplexityHint": complexityHint,
-		},
+		Data:  data,
 	})
 }
 
 // ResetPassword processes the password reset form. It resolves the user DN,
-// generates a temporary password, admin-resets the IDP account to it, then
-// immediately calls provider.ChangePassword (user-bind) so the directory
-// enforces its full password policy (complexity, history, minimum age).
+// generates a temporary password, admin-resets the IDP account to it, exempts the
+// account from the minimum password age, then calls provider.ChangePassword so the
+// directory applies its full password policy (complexity, history).
 // Logs the event, destroys the session, and redirects to login with a success message.
 // POST /reset-password
 func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +293,47 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// The reset below stages a temporary password and clears the account's password
+	// age, which disables the directory's own minimum-age check. Apply the equivalent
+	// gate here first, or a user could cycle through the password history to reuse an
+	// old password. Password history still applies to the change either way, so an
+	// unreadable policy proceeds rather than turning a transient failure into a
+	// helpdesk call; the audit entry records that the gate was skipped.
+	if policy, ok := provider.(idp.PasswordAgePolicy); ok {
+		allowedAt, ageErr := policy.PasswordChangeAllowedAt(r.Context(), userDN)
+		switch {
+		case ageErr != nil:
+			h.logger.Warn("could not evaluate minimum password age, continuing without the gate",
+				"username", sess.Username, "provider_id", sess.ProviderID, "error", ageErr)
+			h.audit.Log(r.Context(), &db.AuditEntry{
+				Timestamp:  time.Now().UTC(),
+				Username:   sess.Username,
+				SourceIP:   r.RemoteAddr,
+				Action:     audit.ActionPasswordReset,
+				ProviderID: sess.ProviderID,
+				Result:     audit.ResultFailure,
+				Details:    "Minimum password age could not be verified; reset continued",
+			})
+		case !allowedAt.IsZero():
+			h.logger.Info("password reset refused by minimum password age",
+				"username", sess.Username, "change_allowed_at", allowedAt)
+			h.audit.Log(r.Context(), &db.AuditEntry{
+				Timestamp:  time.Now().UTC(),
+				Username:   sess.Username,
+				SourceIP:   r.RemoteAddr,
+				Action:     audit.ActionPasswordReset,
+				ProviderID: sess.ProviderID,
+				Result:     audit.ResultFailure,
+				Details:    fmt.Sprintf("Blocked by minimum password age until %s", allowedAt.Format(time.RFC3339)),
+			})
+			h.sessions.SetFlash(w, r, "error", fmt.Sprintf(
+				"Your password was changed too recently. Your organization's policy does not allow another change until %s.",
+				allowedAt.Local().Format("Jan 2, 2006 at 3:04 PM")))
+			http.Redirect(w, r, "/reset-password", http.StatusFound)
+			return
+		}
+	}
+
 	// Load IDP password policy for temp password generation.
 	pwLen, pwUpper, pwLower, pwDigits, pwSpecial := 16, true, true, true, "!@#$%^&()"
 	if idpRecord, recErr := h.store.GetIDP(r.Context(), sess.ProviderID); recErr == nil && idpRecord.ConfigJSON != "" {
@@ -289,6 +348,21 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 			} else {
 				pwSpecial = ""
 			}
+		}
+	}
+
+	// A fine-grained policy can require a longer password than the IDP config knows
+	// about. Taking the larger of the two can only satisfy more policies, so failing
+	// to read the directory's minimum leaves the configured length in place.
+	if reader, ok := provider.(idp.PasswordPolicyReader); ok {
+		switch dirPolicy, polErr := reader.ResolvePasswordPolicy(r.Context(), userDN); {
+		case polErr != nil:
+			h.logger.Warn("could not read the directory's password policy",
+				"username", sess.Username, "configured_length", pwLen, "error", polErr)
+		case dirPolicy.MinLength > pwLen:
+			h.logger.Info("raising temporary password length to satisfy the directory",
+				"username", sess.Username, "configured_length", pwLen, "required_length", dirPolicy.MinLength)
+			pwLen = dirPolicy.MinLength
 		}
 	}
 
@@ -319,6 +393,16 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// The temporary password above reset the account's password-age clock, so the
+	// change below would violate the directory's minimum password age. Clearing it
+	// keeps the change path usable, which is what enforces complexity and history.
+	if clearer, ok := provider.(idp.PasswordAgeClearer); ok {
+		if err := clearer.ClearPasswordAge(r.Context(), userDN); err != nil {
+			h.logger.Error("failed to clear password age during reset flow",
+				"username", sess.Username, "error", err)
+		}
+	}
+
 	if err := provider.ChangePassword(r.Context(), userDN, tempPass, newPassword); err != nil {
 		h.logger.Error("password reset failed",
 			"username", sess.Username,
@@ -333,8 +417,13 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 			Result:     audit.ResultFailure,
 			Details:    fmt.Sprintf("Password reset failed: %v", err),
 		})
-		errMsg := sanitizeDN(err.Error(), userDN, sess.Username)
-		h.sessions.SetFlash(w, r, "error", "Password reset failed: "+errMsg)
+		if errors.Is(err, idp.ErrPasswordPolicy) {
+			h.sessions.SetFlash(w, r, "error",
+				"Password reset failed: the new password does not meet your organization's complexity, history, or minimum age requirements.")
+		} else {
+			errMsg := sanitizeDN(err.Error(), userDN, sess.Username)
+			h.sessions.SetFlash(w, r, "error", "Password reset failed: "+errMsg)
+		}
 		http.Redirect(w, r, "/reset-password", http.StatusFound)
 		return
 	}

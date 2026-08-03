@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/hanej/passport/internal/crypto"
@@ -14,19 +16,21 @@ import (
 
 // ExportData is the top-level JSON structure for export and backup files.
 type ExportData struct {
-	Version              int                   `json:"version"`
-	ExportedAt           string                `json:"exported_at"`
-	SecretsEncrypted     bool                  `json:"secrets_encrypted"`
-	LocalAdmins          []ExportLocalAdmin    `json:"local_admins"`
-	IdentityProviders    []ExportIDP           `json:"identity_providers"`
-	AdminGroups          []ExportAdminGroup    `json:"admin_groups"`
-	UserMappings         []ExportMapping       `json:"user_mappings"`
-	SMTPConfig           *ExportSMTP           `json:"smtp_config"`
-	MFAProviders         []ExportMFAProvider   `json:"mfa_providers"`
-	DefaultMFAProviderID *string               `json:"default_mfa_provider_id"`
-	MFALoginRequired     bool                  `json:"mfa_login_required"`
-	Branding             *db.BrandingConfig    `json:"branding"`
-	EmailTemplates       []ExportEmailTemplate `json:"email_templates"`
+	Version              int                        `json:"version"`
+	ExportedAt           string                     `json:"exported_at"`
+	SecretsEncrypted     bool                       `json:"secrets_encrypted"`
+	LocalAdmins          []ExportLocalAdmin         `json:"local_admins"`
+	IDPGroups            []ExportIDPGroup           `json:"idp_groups,omitempty"`
+	LocalAdminPlacement  *ExportLocalAdminPlacement `json:"local_admin_placement,omitempty"`
+	IdentityProviders    []ExportIDP                `json:"identity_providers"`
+	AdminGroups          []ExportAdminGroup         `json:"admin_groups"`
+	UserMappings         []ExportMapping            `json:"user_mappings"`
+	SMTPConfig           *ExportSMTP                `json:"smtp_config"`
+	MFAProviders         []ExportMFAProvider        `json:"mfa_providers"`
+	DefaultMFAProviderID *string                    `json:"default_mfa_provider_id"`
+	MFALoginRequired     bool                       `json:"mfa_login_required"`
+	Branding             *db.BrandingConfig         `json:"branding"`
+	EmailTemplates       []ExportEmailTemplate      `json:"email_templates"`
 }
 
 // ExportLocalAdmin represents a local admin account in the export.
@@ -35,6 +39,26 @@ type ExportLocalAdmin struct {
 	PasswordHash       string   `json:"password_hash"`
 	MustChangePassword bool     `json:"must_change_password"`
 	PasswordHistory    []string `json:"password_history,omitempty"`
+}
+
+// ExportIDPGroup represents a provider group in the export. Groups are keyed by
+// name rather than by their local autoincrement ID, so an import into a
+// different installation still lands providers in the right section.
+type ExportIDPGroup struct {
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Icon           string `json:"icon"`
+	Collapsible    bool   `json:"collapsible"`
+	StartCollapsed bool   `json:"start_collapsed,omitempty"`
+	DisplayOrder   int    `json:"display_order"`
+}
+
+// ExportLocalAdminPlacement records where the built-in Local Admin card sits.
+// Like providers, its group is referenced by name so the arrangement survives an
+// import into a different installation.
+type ExportLocalAdminPlacement struct {
+	GroupName    string `json:"group_name,omitempty"`
+	DisplayOrder int    `json:"display_order,omitempty"`
 }
 
 // ExportIDP represents an identity provider in the export.
@@ -46,6 +70,8 @@ type ExportIDP struct {
 	Enabled           bool                     `json:"enabled"`
 	LogoURL           string                   `json:"logo_url"`
 	MFAProviderID     *string                  `json:"mfa_provider_id"`
+	GroupName         string                   `json:"group_name,omitempty"`
+	DisplayOrder      int                      `json:"display_order,omitempty"`
 	Config            json.RawMessage          `json:"config"`
 	Secrets           json.RawMessage          `json:"secrets"`
 	AttributeMappings []ExportAttrMapping      `json:"attribute_mappings"`
@@ -144,6 +170,7 @@ type ExportEmailTemplate struct {
 // ImportResult tracks what was imported.
 type ImportResult struct {
 	LocalAdmins    int
+	IDPGroups      int
 	IDPs           int
 	AdminGroups    int
 	UserMappings   int
@@ -327,6 +354,37 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 		data.LocalAdmins = append(data.LocalAdmins, ea)
 	}
 
+	// Provider groups, listed before the providers that reference them.
+	idpGroups, err := store.ListIDPGroups(ctx)
+	if err != nil {
+		return fmt.Errorf("list provider groups: %w", err)
+	}
+	groupNameByID := make(map[int64]string, len(idpGroups))
+	for _, g := range idpGroups {
+		groupNameByID[g.ID] = g.Name
+		data.IDPGroups = append(data.IDPGroups, ExportIDPGroup{
+			Name:           g.Name,
+			Description:    g.Description,
+			Icon:           g.Icon,
+			Collapsible:    g.Collapsible,
+			StartCollapsed: g.StartCollapsed,
+			DisplayOrder:   g.DisplayOrder,
+		})
+	}
+
+	// Local Admin is arranged like a provider but has no row to carry it.
+	localPlacement, err := store.GetLocalAdminPlacement(ctx)
+	if err != nil {
+		return fmt.Errorf("get local admin placement: %w", err)
+	}
+	if localPlacement.GroupID != nil || localPlacement.DisplayOrder != 0 {
+		elap := &ExportLocalAdminPlacement{DisplayOrder: localPlacement.DisplayOrder}
+		if localPlacement.GroupID != nil {
+			elap.GroupName = groupNameByID[*localPlacement.GroupID]
+		}
+		data.LocalAdminPlacement = elap
+	}
+
 	// 2. Identity providers with related data
 	idps, err := store.ListIDPs(ctx)
 	if err != nil {
@@ -341,8 +399,12 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 			Enabled:       rec.Enabled,
 			LogoURL:       rec.LogoURL,
 			MFAProviderID: rec.MFAProviderID,
+			DisplayOrder:  rec.DisplayOrder,
 			Config:        json.RawMessage(rec.ConfigJSON),
 			Secrets:       json.RawMessage("{}"),
+		}
+		if rec.GroupID != nil {
+			ei.GroupName = groupNameByID[*rec.GroupID]
 		}
 
 		// Attribute mappings
@@ -557,6 +619,45 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 
 	// 2. Identity providers
 	if sections.IDPs {
+		// Provider groups are matched by name, not by their local autoincrement
+		// ID, so an import into a different installation reuses the group the
+		// admin already has rather than creating a duplicate. Matching is
+		// case-insensitive, the same rule the admin UI enforces on new groups.
+		groupIDByName := make(map[string]int64, len(data.IDPGroups))
+		groupKey := strings.ToLower
+		existingGroups, err := store.ListIDPGroups(ctx)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Failed to list provider groups: %v", err))
+		}
+		for _, g := range existingGroups {
+			groupIDByName[groupKey(g.Name)] = g.ID
+		}
+		for _, eg := range data.IDPGroups {
+			group := &db.IDPGroup{
+				Name:           eg.Name,
+				Description:    eg.Description,
+				Icon:           eg.Icon,
+				Collapsible:    eg.Collapsible,
+				StartCollapsed: eg.StartCollapsed,
+			}
+			if id, ok := groupIDByName[groupKey(eg.Name)]; ok {
+				group.ID = id
+				if updateErr := store.UpdateIDPGroup(ctx, group); updateErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to update provider group %q: %v", eg.Name, updateErr))
+					continue
+				}
+			} else {
+				if createErr := store.CreateIDPGroup(ctx, group); createErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to create provider group %q: %v", eg.Name, createErr))
+					continue
+				}
+				groupIDByName[groupKey(eg.Name)] = group.ID
+			}
+			result.IDPGroups++
+		}
+
+		var placements []db.IDPPlacement
+
 		for _, ei := range data.IdentityProviders {
 			secretBlob, err := resolveSecretBlob(data.SecretsEncrypted, ei.Secrets, cryptoSvc)
 			if err != nil {
@@ -678,7 +779,50 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 				}
 			}
 
+			placement := db.IDPPlacement{IDPID: ei.ID, DisplayOrder: ei.DisplayOrder}
+			if ei.GroupName != "" {
+				if id, ok := groupIDByName[groupKey(ei.GroupName)]; ok {
+					placement.GroupID = &id
+				}
+			}
+			placements = append(placements, placement)
+
 			result.IDPs++
+		}
+
+		// Older export files predate provider groups and carry no arrangement.
+		// Applying one anyway would flatten the layout the admin already has.
+		if lap := data.LocalAdminPlacement; lap != nil {
+			p := db.IDPPlacement{IDPID: db.LocalAdminIDPID, DisplayOrder: lap.DisplayOrder}
+			if lap.GroupName != "" {
+				if id, ok := groupIDByName[groupKey(lap.GroupName)]; ok {
+					p.GroupID = &id
+				}
+			}
+			placements = append(placements, p)
+		}
+
+		hasArrangement := len(data.IDPGroups) > 0 || data.LocalAdminPlacement != nil
+		for _, ei := range data.IdentityProviders {
+			if ei.GroupName != "" || ei.DisplayOrder != 0 {
+				hasArrangement = true
+				break
+			}
+		}
+		if hasArrangement && len(placements) > 0 {
+			groupOrder := make([]int64, 0, len(data.IDPGroups))
+			ordered := append([]ExportIDPGroup(nil), data.IDPGroups...)
+			sort.SliceStable(ordered, func(i, j int) bool {
+				return ordered[i].DisplayOrder < ordered[j].DisplayOrder
+			})
+			for _, eg := range ordered {
+				if id, ok := groupIDByName[groupKey(eg.Name)]; ok {
+					groupOrder = append(groupOrder, id)
+				}
+			}
+			if err := store.SetIDPArrangement(ctx, groupOrder, placements); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("Failed to restore provider arrangement: %v", err))
+			}
 		}
 	}
 

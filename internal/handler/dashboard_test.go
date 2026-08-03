@@ -32,7 +32,7 @@ func dashboardStubRenderer(t *testing.T) *Renderer {
 		"pages":    func(n int) []int { return nil },
 	}
 	pages := make(map[string]*template.Template)
-	pages["dashboard.html"] = template.Must(template.New("dashboard.html").Funcs(funcMap).Parse(`{{define "base"}}dashboard {{range .Data.Panels}}{{.IDP.FriendlyName}} {{end}}{{end}}`))
+	pages["dashboard.html"] = template.Must(template.New("dashboard.html").Funcs(funcMap).Parse(`{{define "base"}}dashboard {{range .Data.Sections}}{{range .Panels}}{{.IDP.FriendlyName}} {{end}}{{end}}{{end}}`))
 	pages["error.html"] = template.Must(template.New("error.html").Funcs(funcMap).Parse(`{{define "base"}}error page{{end}}`))
 	pages["login.html"] = template.Must(template.New("login.html").Funcs(funcMap).Parse(`{{define "base"}}login page{{end}}`))
 
@@ -154,7 +154,7 @@ func TestShowDashboardRendersIDPPanels(t *testing.T) {
 			Title:   "Dashboard",
 			Session: sess,
 			Data: map[string]any{
-				"Panels":     panels,
+				"Sections":   []DashboardSection{{Panels: panels}},
 				"ProviderID": sess.ProviderID,
 			},
 		})

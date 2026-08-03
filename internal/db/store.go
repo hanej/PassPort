@@ -71,8 +71,46 @@ type IdentityProviderRecord struct {
 	MFAProviderID *string // nullable FK to mfa_providers; nil means use default
 	ConfigJSON    string
 	SecretBlob    []byte
+	GroupID       *int64 // nullable FK to idp_groups; nil means ungrouped
+	DisplayOrder  int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// IDPGroup is a named section that identity providers are arranged into on the
+// login page and dashboard.
+type IDPGroup struct {
+	ID          int64
+	Name        string
+	Description string
+	Icon        string
+	Collapsible bool
+	// StartCollapsed only applies when Collapsible is set, so a group users
+	// cannot expand never starts hidden.
+	StartCollapsed bool
+	DisplayOrder   int
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// IDPPlacement assigns one provider to a group position. A nil GroupID leaves
+// the provider ungrouped.
+type IDPPlacement struct {
+	IDPID        string
+	GroupID      *int64
+	DisplayOrder int
+}
+
+// LocalAdminIDPID is the reserved provider ID of the built-in Local Admin
+// account. It has no identity_providers row, so an IDPPlacement carrying this
+// ID is stored in local_admin_placement instead.
+const LocalAdminIDPID = "local"
+
+// LocalAdminPlacement is where the built-in Local Admin card sits on the login
+// page. A nil GroupID leaves it ungrouped, which is the default.
+type LocalAdminPlacement struct {
+	GroupID      *int64
+	DisplayOrder int
 }
 
 // AttributeMapping represents a canonical-to-directory attribute mapping.
@@ -109,6 +147,15 @@ type IDPStore interface {
 	GetCorrelationRule(ctx context.Context, idpID string) (*CorrelationRule, error)
 	SetCorrelationRule(ctx context.Context, rule *CorrelationRule) error
 	DeleteCorrelationRule(ctx context.Context, idpID string) error
+
+	// Provider groups
+	ListIDPGroups(ctx context.Context) ([]IDPGroup, error)
+	GetIDPGroup(ctx context.Context, id int64) (*IDPGroup, error)
+	CreateIDPGroup(ctx context.Context, g *IDPGroup) error
+	UpdateIDPGroup(ctx context.Context, g *IDPGroup) error
+	DeleteIDPGroup(ctx context.Context, id int64) error
+	SetIDPArrangement(ctx context.Context, groupOrder []int64, placements []IDPPlacement) error
+	GetLocalAdminPlacement(ctx context.Context) (LocalAdminPlacement, error)
 }
 
 // Session represents a user session.

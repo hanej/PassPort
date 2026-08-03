@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -220,6 +221,7 @@ func (h *AdminIDPHandler) UploadLogo(w http.ResponseWriter, r *http.Request) {
 type IDPListItem struct {
 	db.IdentityProviderRecord
 	Endpoint string
+	URL      string
 }
 
 func (h *AdminIDPHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +241,7 @@ func (h *AdminIDPHandler) List(w http.ResponseWriter, r *http.Request) {
 		var cfg idp.Config
 		if err := json.Unmarshal([]byte(rec.ConfigJSON), &cfg); err == nil {
 			items[i].Endpoint = cfg.Endpoint
+			items[i].URL = cfg.URL
 		}
 	}
 
@@ -315,6 +318,18 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The slug becomes a primary key and part of the logo filename on disk, so
+	// validate it server-side rather than relying on the form's pattern attribute.
+	if !idp.ValidID(idpID) {
+		h.renderer.Render(w, r, "admin_idp_form.html", PageData{
+			Title:   "Add Identity Provider",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "ID may only contain lowercase letters, numbers, and hyphens"},
+			Data:    map[string]any{"Mode": "create"},
+		})
+		return
+	}
+
 	cfg := h.parseIDPConfig(r)
 
 	configJSON, err := json.Marshal(cfg)
@@ -338,8 +353,10 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	logoURL := h.handleLogoUpload(r, idpID, "")
 
+	isDirectory := idp.ProviderType(r.FormValue("provider_type")).IsDirectory()
+
 	var mfaProviderID *string
-	if v := r.FormValue("mfa_provider_id"); v != "" {
+	if v := r.FormValue("mfa_provider_id"); v != "" && isDirectory {
 		mfaProviderID = &v
 	}
 
@@ -372,7 +389,7 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Save attribute mappings.
 	mappings := h.parseAttributeMappings(r, idpID)
-	if len(mappings) > 0 {
+	if len(mappings) > 0 && isDirectory {
 		if err := h.store.SetAttributeMappings(r.Context(), idpID, mappings); err != nil {
 			h.logger.Error("failed to save attribute mappings", "error", err, "idp_id", idpID)
 		}
@@ -380,7 +397,7 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Save correlation rule.
 	rule := h.parseCorrelationRule(r, idpID)
-	if rule != nil {
+	if rule != nil && isDirectory {
 		if err := h.store.SetCorrelationRule(r.Context(), rule); err != nil {
 			h.logger.Error("failed to save correlation rule", "error", err, "idp_id", idpID)
 		}
@@ -579,7 +596,8 @@ func (h *AdminIDPHandler) Update(w http.ResponseWriter, r *http.Request) {
 	record.LogoURL = h.handleLogoUpload(r, idpID, record.LogoURL)
 	record.ConfigJSON = string(configJSON)
 	record.SecretBlob = secretBlob
-	if v := r.FormValue("mfa_provider_id"); v != "" {
+	isDirectory := idp.ProviderType(record.ProviderType).IsDirectory()
+	if v := r.FormValue("mfa_provider_id"); v != "" && isDirectory {
 		record.MFAProviderID = &v
 	} else {
 		record.MFAProviderID = nil
@@ -593,18 +611,22 @@ func (h *AdminIDPHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Update attribute mappings.
 	mappings := h.parseAttributeMappings(r, idpID)
+	if !isDirectory {
+		mappings = nil
+	}
 	if err := h.store.SetAttributeMappings(r.Context(), idpID, mappings); err != nil {
 		h.logger.Error("failed to save attribute mappings", "error", err, "idp_id", idpID)
 	}
 
 	// Update correlation rule.
 	rule := h.parseCorrelationRule(r, idpID)
-	if rule != nil {
+	if rule != nil && isDirectory {
 		if err := h.store.SetCorrelationRule(r.Context(), rule); err != nil {
 			h.logger.Error("failed to save correlation rule", "error", err, "idp_id", idpID)
 		}
 	} else {
-		if err := h.store.DeleteCorrelationRule(r.Context(), idpID); err != nil {
+		// A provider with no correlation rule is the normal case, not an error.
+		if err := h.store.DeleteCorrelationRule(r.Context(), idpID); err != nil && !errors.Is(err, db.ErrNotFound) {
 			h.logger.Error("failed to delete correlation rule", "error", err, "idp_id", idpID)
 		}
 	}
@@ -663,6 +685,9 @@ func (h *AdminIDPHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if oldCfg.PasswordComplexityHint != cfg.PasswordComplexityHint {
 		changes = append(changes, "password_complexity_hint: (changed)")
+	}
+	if oldCfg.URL != cfg.URL {
+		changes = append(changes, fmt.Sprintf("url: %s → %s", oldCfg.URL, cfg.URL))
 	}
 	// Note credential changes without logging the actual values.
 	if oldSecrets.ServiceAccountUsername != secrets.ServiceAccountUsername {
@@ -811,6 +836,23 @@ func (h *AdminIDPHandler) TestConnection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Weblink providers have no directory to connect to — the client opens the URL.
+	if idp.ProviderType(record.ProviderType) == idp.ProviderTypeWebLink {
+		if cfg.URL == "" {
+			h.renderer.JSON(w, http.StatusOK, map[string]string{
+				"status":  "error",
+				"message": "No URL configured for this link",
+			})
+			return
+		}
+		h.renderer.JSON(w, http.StatusOK, map[string]string{
+			"status":  "success",
+			"message": "Opening " + cfg.URL,
+			"url":     cfg.URL,
+		})
+		return
+	}
+
 	var secrets idp.Secrets
 	if len(record.SecretBlob) > 0 {
 		plaintext, err := h.crypto.Decrypt(record.SecretBlob)
@@ -904,6 +946,23 @@ func (h *AdminIDPHandler) TestConnectionFromForm(w http.ResponseWriter, r *http.
 		"protocol", cfg.Protocol,
 		"tls_skip_verify", cfg.TLSSkipVerify,
 	)
+
+	// Weblink providers have no directory to connect to — the client opens the URL.
+	if providerType == string(idp.ProviderTypeWebLink) {
+		if cfg.URL == "" {
+			h.renderer.JSON(w, http.StatusBadRequest, map[string]string{
+				"status":  "error",
+				"message": "A valid http:// or https:// URL is required",
+			})
+			return
+		}
+		h.renderer.JSON(w, http.StatusOK, map[string]string{
+			"status":  "success",
+			"message": "Opening " + cfg.URL,
+			"url":     cfg.URL,
+		})
+		return
+	}
 
 	if cfg.Endpoint == "" || cfg.Protocol == "" {
 		h.renderer.JSON(w, http.StatusBadRequest, map[string]string{
@@ -1322,6 +1381,7 @@ func (h *AdminIDPHandler) parseIDPConfig(r *http.Request) idp.Config {
 		PasswordAllowSpecialChars: r.FormValue("password_allow_special") == "on",
 		PasswordSpecialChars:      r.FormValue("password_special_chars"),
 		PasswordLength:            pwLength,
+		URL:                       idp.NormalizeWebLinkURL(r.FormValue("weblink_url")),
 	}
 }
 
@@ -1380,6 +1440,18 @@ func (h *AdminIDPHandler) encryptSecrets(secrets idp.Secrets) ([]byte, error) {
 	return blob, nil
 }
 
+// directoryIDPs filters out providers that are not backed by an LDAP directory
+// (currently weblink), which cannot participate in directory-driven features.
+func directoryIDPs(idps []db.IdentityProviderRecord) []db.IdentityProviderRecord {
+	out := make([]db.IdentityProviderRecord, 0, len(idps))
+	for _, rec := range idps {
+		if idp.ProviderType(rec.ProviderType).IsDirectory() {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
 // buildProvider creates a fully functional Provider from configuration.
 func buildProvider(id, providerType string, cfg idp.Config, secrets idp.Secrets, logger *slog.Logger) (idp.Provider, error) {
 	connector := &idp.DefaultLDAPConnector{}
@@ -1396,6 +1468,12 @@ func buildProvider(id, providerType string, cfg idp.Config, secrets idp.Secrets,
 
 // registerProvider decrypts secrets and registers a live provider in the registry.
 func (h *AdminIDPHandler) registerProvider(_ context.Context, record *db.IdentityProviderRecord) error {
+	// Weblink providers have no directory connection, so there is nothing to register.
+	if idp.ProviderType(record.ProviderType) == idp.ProviderTypeWebLink {
+		h.registry.Unregister(record.ID)
+		return nil
+	}
+
 	var cfg idp.Config
 	if err := json.Unmarshal([]byte(record.ConfigJSON), &cfg); err != nil {
 		return fmt.Errorf("parsing config for %s: %w", record.ID, err)

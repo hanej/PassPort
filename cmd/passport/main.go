@@ -114,6 +114,7 @@ func main() {
 	exportPath := flag.String("export", "", "export configuration to file and exit (secrets decrypted)")
 	backupPath := flag.String("backup", "", "backup configuration to file and exit (secrets stay encrypted)")
 	importPath := flag.String("import", "", "import configuration from file and exit")
+	renameIDP := flag.String("rename-idp", "", "rename an identity provider slug and exit (usage: -rename-idp <old-slug>=<new-slug>); stop the service first")
 	resetAdminPassword := flag.String("reset-admin-password", "", "reset a local admin password and force change at next login (usage: -reset-admin-password <username>)")
 	forcePasswordChange := flag.String("force-password-change", "", "force a local admin to change their password at next login (usage: -force-password-change <username>)")
 	flag.Parse()
@@ -205,6 +206,22 @@ func main() {
 	}
 	logger.Info("master key loaded")
 
+	// Maintenance commands act on an existing database. Opening SQLite creates
+	// the file when it is missing, so a wrong -config or working directory would
+	// otherwise silently produce an empty database and a confusing "not found".
+	maintenanceMode := *exportPath != "" || *backupPath != "" || *importPath != "" || *renameIDP != ""
+	if maintenanceMode {
+		if _, statErr := os.Stat(cfg.Database.Path); os.IsNotExist(statErr) {
+			abs, absErr := filepath.Abs(cfg.Database.Path)
+			if absErr != nil {
+				abs = cfg.Database.Path
+			}
+			fmt.Fprintf(os.Stderr, "database not found: %s\n", abs)
+			fmt.Fprintln(os.Stderr, "Pass -config <path to config.yaml> so the correct database is used.")
+			os.Exit(1)
+		}
+	}
+
 	// Open database
 	database, err := db.Open(cfg.Database.Path)
 	if err != nil {
@@ -247,6 +264,7 @@ func main() {
 		logger.Info("configuration imported",
 			"admins", result.LocalAdmins,
 			"idps", result.IDPs,
+			"idp_groups", result.IDPGroups,
 			"groups", result.AdminGroups,
 			"mappings", result.UserMappings,
 			"smtp", result.SMTP,
@@ -259,6 +277,13 @@ func main() {
 			for _, e := range result.Errors {
 				logger.Warn("import error", "detail", e)
 			}
+		}
+		os.Exit(0)
+	}
+	if *renameIDP != "" {
+		if err := runRenameIDP(ctx, database, cfg.Database.Path, filepath.Join(filepath.Dir(cfg.Database.Path), "uploads"), *renameIDP, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 		os.Exit(0)
 	}
@@ -354,6 +379,7 @@ func main() {
 	bootstrapHandler := handler.NewBootstrapHandler(database, sessions, renderer, auditLogger, policy, logger)
 	uploadsDir := filepath.Join(filepath.Dir(cfg.Database.Path), "uploads")
 	adminIDPHandler := handler.NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLogger, logger, uploadsDir)
+	adminIDPGroupHandler := handler.NewAdminIDPGroupHandler(database, renderer, auditLogger, logger)
 	// Load all enabled IDPs into the live registry.
 	if err := adminIDPHandler.LoadProviders(context.Background()); err != nil {
 		logger.Error("failed to load providers at startup", "error", err)
@@ -399,6 +425,7 @@ func main() {
 		Link:                linkHandler,
 		Bootstrap:           bootstrapHandler,
 		AdminIDP:            adminIDPHandler,
+		AdminIDPGroups:      adminIDPGroupHandler,
 		AdminSMTP:           adminSMTPHandler,
 		AdminEmailTemplates: adminEmailTemplatesHandler,
 		AdminGroups:         adminGroupsHandler,

@@ -74,7 +74,7 @@ func (h *AdminGroupsHandler) List(w http.ResponseWriter, r *http.Request) {
 		Session: sess,
 		Data: map[string]any{
 			"Groups":     groups,
-			"IDPs":       idps,
+			"IDPs":       directoryIDPs(idps),
 			"ActivePage": "groups",
 		},
 	})
@@ -110,7 +110,7 @@ func (h *AdminGroupsHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Flash:   map[string]string{"category": "error", "message": "IDP and Group DN are required"},
 			Data: map[string]any{
 				"Groups": groups,
-				"IDPs":   idps,
+				"IDPs":   directoryIDPs(idps),
 			},
 		})
 		return

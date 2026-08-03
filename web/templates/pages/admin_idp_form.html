@@ -29,8 +29,8 @@
                     <input type="text" class="form-control" id="idp_id" name="id"
                            value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.ID}}{{end}}"
                            {{if eq .Data.Mode "edit"}}readonly{{end}}
-                           required pattern="[a-z0-9-]+" placeholder="e.g., corp-ad">
-                    <div class="form-text">Lowercase letters, numbers, and hyphens only.</div>
+                           required pattern="[a-z0-9\-]+" placeholder="e.g., corp-ad">
+                    <div class="form-text">Lowercase letters, numbers, and hyphens only. Cannot be changed after the provider is created.</div>
                 </div>
                 <div class="col-md-4">
                     <label for="friendly_name" class="form-label">Friendly Name</label>
@@ -44,15 +44,56 @@
                         <option value="">Select type...</option>
                         <option value="ad" {{if and (eq .Data.Mode "edit") (eq .Data.IDP.ProviderType "ad")}}selected{{end}}>Active Directory</option>
                         <option value="freeipa" {{if and (eq .Data.Mode "edit") (eq .Data.IDP.ProviderType "freeipa")}}selected{{end}}>FreeIPA</option>
+                        <option value="weblink" {{if and (eq .Data.Mode "edit") (eq .Data.IDP.ProviderType "weblink")}}selected{{end}}>Web Link</option>
                     </select>
                 </div>
                 <div class="col-12">
                     <label for="description" class="form-label">Description</label>
-                    <input type="text" class="form-control" id="description" name="description"
-                           value="{{if eq .Data.Mode "edit"}}{{.Data.IDP.Description}}{{end}}"
-                           placeholder="Brief description of this provider">
+                    <div class="markdown-editor" data-md-editor>
+                        <div class="markdown-toolbar btn-toolbar" role="toolbar" aria-label="Markdown formatting">
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="bold"
+                                        title="Bold" aria-label="Bold"><i class="bi bi-type-bold"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="italic"
+                                        title="Italic" aria-label="Italic"><i class="bi bi-type-italic"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="code"
+                                        title="Inline code" aria-label="Inline code"><i class="bi bi-code"></i></button>
+                            </div>
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="link"
+                                        title="Link" aria-label="Link"><i class="bi bi-link-45deg"></i></button>
+                            </div>
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="ul"
+                                        title="Bulleted list" aria-label="Bulleted list"><i class="bi bi-list-ul"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="ol"
+                                        title="Numbered list" aria-label="Numbered list"><i class="bi bi-list-ol"></i></button>
+                            </div>
+                            <button type="button"
+                                    class="btn btn-link btn-sm p-0 ms-auto align-self-center markdown-help-btn"
+                                    data-bs-toggle="popover"
+                                    data-bs-trigger="focus"
+                                    data-bs-placement="left"
+                                    data-bs-html="true"
+                                    data-bs-title="Markdown Syntax"
+                                    data-bs-content="&lt;code&gt;**bold**&lt;/code&gt; &amp;nbsp; &lt;code&gt;*italic*&lt;/code&gt;&lt;br&gt;&lt;code&gt;[text](https://example.com)&lt;/code&gt; link&lt;br&gt;&lt;code&gt;- item&lt;/code&gt; bullet list&lt;br&gt;&lt;code&gt;1. item&lt;/code&gt; numbered list&lt;br&gt;&lt;br&gt;&lt;a href=&quot;https://www.markdownguide.org/basic-syntax/&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Full syntax reference ↗&lt;/a&gt;"
+                                    aria-label="Markdown syntax help">
+                                <i class="bi bi-question-circle"></i>
+                            </button>
+                        </div>
+                        <textarea class="form-control" id="description" name="description" rows="3"
+                                  placeholder="Brief description of this provider">{{if eq .Data.Mode "edit"}}{{.Data.IDP.Description}}{{end}}</textarea>
+                    </div>
+                    <div class="form-text">Supports Markdown, including links. Shown under the provider name on the login page and dashboard.</div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-12 d-none" id="weblink-url-field">
+                    <label for="weblink_url" class="form-label">URL</label>
+                    <input type="url" class="form-control" id="weblink_url" name="weblink_url"
+                           value="{{if eq .Data.Mode "edit"}}{{.Data.Config.URL}}{{end}}"
+                           placeholder="https://example.com/portal">
+                    <div class="form-text">Opened in a new window when a user selects this provider. Must start with http:// or https://.</div>
+                </div>
+                <div class="col-md-6" id="mfa-provider-field">
                     <label for="mfa_provider_id" class="form-label">MFA Provider</label>
                     <select class="form-select" id="mfa_provider_id" name="mfa_provider_id">
                         {{if ne "" .Data.DefaultMFAID}}
@@ -96,7 +137,7 @@
     </div>
 
     <!-- Connection Settings -->
-    <div class="card mb-4">
+    <div class="card mb-4 idp-ldap-section" id="section-connection">
         <div class="card-header">
             <h5 class="mb-0"><i class="bi bi-plug me-2"></i>Connection Settings</h5>
         </div>
@@ -176,7 +217,7 @@
     </div>
 
     <!-- Password Settings -->
-    <div class="card mb-4">
+    <div class="card mb-4 idp-ldap-section" id="section-password">
         <div class="card-header">
             <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Password Settings</h5>
         </div>
@@ -234,30 +275,52 @@
                     </div>
                 </div>
                 <div class="col-md-6">
-                    <label for="password_hint" class="form-label">
-                        Password Complexity Hint
-                        <button type="button"
-                                class="btn btn-link btn-sm p-0 ms-1 align-baseline markdown-help-btn"
-                                data-bs-toggle="popover"
-                                data-bs-trigger="hover focus"
-                                data-bs-placement="top"
-                                data-bs-html="true"
-                                data-bs-title="Markdown Syntax"
-                                data-bs-content="&lt;code&gt;**bold**&lt;/code&gt; &amp;nbsp; &lt;code&gt;*italic*&lt;/code&gt;&lt;br&gt;&lt;code&gt;- item&lt;/code&gt; bullet list&lt;br&gt;&lt;code&gt;1. item&lt;/code&gt; numbered list&lt;br&gt;&lt;code&gt;&amp;lt;u&amp;gt;text&amp;lt;/u&amp;gt;&lt;/code&gt; underline&lt;br&gt;&lt;code&gt;&amp;amp;nbsp;&lt;/code&gt; extra space&lt;br&gt;&lt;br&gt;&lt;a href=&quot;https://www.markdownguide.org/basic-syntax/&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Full syntax reference ↗&lt;/a&gt;"
-                                aria-label="Markdown syntax help">
-                            <i class="bi bi-question-circle text-muted"></i>
-                        </button>
-                    </label>
-                    <textarea class="form-control" id="password_hint" name="password_complexity_hint"
-                              rows="6" placeholder="e.g.,&#10;**Minimum 8 characters** including:&#10;- 1 uppercase letter (A–Z)&#10;- 1 number (0–9)&#10;- 1 special character">{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordComplexityHint}}{{end}}</textarea>
-                    <div class="form-text">Supports Markdown. Displayed to users when changing their password.</div>
+                    <label for="password_hint" class="form-label">Password Complexity Hint</label>
+                    <div class="markdown-editor" data-md-editor>
+                        <div class="markdown-toolbar btn-toolbar" role="toolbar" aria-label="Markdown formatting">
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="bold"
+                                        title="Bold" aria-label="Bold"><i class="bi bi-type-bold"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="italic"
+                                        title="Italic" aria-label="Italic"><i class="bi bi-type-italic"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="underline"
+                                        title="Underline" aria-label="Underline"><i class="bi bi-type-underline"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="code"
+                                        title="Inline code" aria-label="Inline code"><i class="bi bi-code"></i></button>
+                            </div>
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="link"
+                                        title="Link" aria-label="Link"><i class="bi bi-link-45deg"></i></button>
+                            </div>
+                            <div class="btn-group btn-group-sm me-2" role="group">
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="ul"
+                                        title="Bulleted list" aria-label="Bulleted list"><i class="bi bi-list-ul"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" data-md-action="ol"
+                                        title="Numbered list" aria-label="Numbered list"><i class="bi bi-list-ol"></i></button>
+                            </div>
+                            <button type="button"
+                                    class="btn btn-link btn-sm p-0 ms-auto align-self-center markdown-help-btn"
+                                    data-bs-toggle="popover"
+                                    data-bs-trigger="focus"
+                                    data-bs-placement="left"
+                                    data-bs-html="true"
+                                    data-bs-title="Markdown Syntax"
+                                    data-bs-content="&lt;code&gt;**bold**&lt;/code&gt; &amp;nbsp; &lt;code&gt;*italic*&lt;/code&gt;&lt;br&gt;&lt;code&gt;[text](https://example.com)&lt;/code&gt; link&lt;br&gt;&lt;code&gt;- item&lt;/code&gt; bullet list&lt;br&gt;&lt;code&gt;1. item&lt;/code&gt; numbered list&lt;br&gt;&lt;code&gt;&amp;lt;u&amp;gt;text&amp;lt;/u&amp;gt;&lt;/code&gt; underline&lt;br&gt;&lt;code&gt;&amp;amp;nbsp;&lt;/code&gt; extra space&lt;br&gt;&lt;br&gt;&lt;a href=&quot;https://www.markdownguide.org/basic-syntax/&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Full syntax reference ↗&lt;/a&gt;"
+                                    aria-label="Markdown syntax help">
+                                <i class="bi bi-question-circle"></i>
+                            </button>
+                        </div>
+                        <textarea class="form-control" id="password_hint" name="password_complexity_hint"
+                                  rows="6" placeholder="e.g.,&#10;**Minimum 8 characters** including:&#10;- 1 uppercase letter (A–Z)&#10;- 1 number (0–9)&#10;- 1 special character">{{if eq .Data.Mode "edit"}}{{.Data.Config.PasswordComplexityHint}}{{end}}</textarea>
+                    </div>
+                    <div class="form-text">Supports Markdown and inline HTML. Displayed to users when changing their password.</div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Notification Settings -->
-    <div class="card mb-4">
+    <div class="card mb-4 idp-ldap-section" id="section-notification">
         <div class="card-header">
             <h5 class="mb-0"><i class="bi bi-bell me-2"></i>Email Notification</h5>
         </div>
@@ -282,7 +345,7 @@
     </div>
 
     <!-- Attribute Mappings -->
-    <div class="card mb-4">
+    <div class="card mb-4 idp-ldap-section" id="section-mappings">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="bi bi-arrows-angle-contract me-2"></i>Attribute Mappings</h5>
             <button type="button" class="btn btn-sm btn-outline-primary" id="add-attr-mapping">
@@ -332,7 +395,7 @@
     </div>
 
     <!-- Correlation Rule -->
-    <div class="card mb-4">
+    <div class="card mb-4 idp-ldap-section" id="section-correlation">
         <div class="card-header">
             <h5 class="mb-0"><i class="bi bi-link me-2"></i>Correlation Rule</h5>
         </div>
@@ -368,7 +431,7 @@
                 <i class="bi bi-plug me-1"></i>Test Connection
             </button>
             {{if eq .Data.Mode "edit"}}
-            <a href="/admin/idp/{{.Data.IDP.ID}}/expiration" class="btn btn-outline-warning">
+            <a href="/admin/idp/{{.Data.IDP.ID}}/expiration" class="btn btn-outline-warning idp-ldap-section" id="expiration-link">
                 <i class="bi bi-clock-history me-1"></i>Password Expiration
             </a>
             {{end}}
@@ -453,6 +516,37 @@
         document.getElementById('remove_logo').value = '';
         preview.classList.remove('d-none');
     }
+
+    // Web Link providers have no directory, so every LDAP-specific section is
+    // hidden and its required fields relaxed (hidden required inputs block submit).
+    var typeSelect = document.getElementById('idp_type');
+    var urlField = document.getElementById('weblink-url-field');
+    var urlInput = document.getElementById('weblink_url');
+    var mfaField = document.getElementById('mfa-provider-field');
+    var mfaSelect = document.getElementById('mfa_provider_id');
+
+    function applyProviderTypeVisibility() {
+        var isWebLink = typeSelect.value === 'weblink';
+
+        document.querySelectorAll('.idp-ldap-section').forEach(function (section) {
+            section.classList.toggle('d-none', isWebLink);
+            section.querySelectorAll('[required]').forEach(function (field) {
+                field.dataset.wasRequired = '1';
+            });
+            section.querySelectorAll('[data-was-required]').forEach(function (field) {
+                field.required = !isWebLink;
+            });
+        });
+
+        urlField.classList.toggle('d-none', !isWebLink);
+        urlInput.required = isWebLink;
+
+        mfaField.classList.toggle('d-none', isWebLink);
+        if (isWebLink) { mfaSelect.value = ''; }
+    }
+
+    typeSelect.addEventListener('change', applyProviderTypeVisibility);
+    applyProviderTypeVisibility();
 })();
 </script>
 {{end}}

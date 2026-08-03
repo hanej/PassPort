@@ -27,6 +27,7 @@ type Renderer struct {
 	branding   atomic.Pointer[db.BrandingConfig]
 	appVersion string
 	md         goldmark.Markdown
+	mdSafe     goldmark.Markdown
 }
 
 // PageData holds all data passed to templates for rendering.
@@ -47,6 +48,9 @@ func NewRenderer(appVersion string, logger *slog.Logger) (*Renderer, error) {
 		logger:     logger,
 		appVersion: appVersion,
 		md:         goldmark.New(goldmark.WithRendererOptions(goldmarkhtml.WithUnsafe())),
+		// Default (safe) options: raw HTML is dropped and javascript:/data: link
+		// destinations are stripped.
+		mdSafe: goldmark.New(),
 	}
 
 	// Set default branding so templates always have a value.
@@ -79,6 +83,16 @@ func NewRenderer(appVersion string, logger *slog.Logger) (*Renderer, error) {
 		"markdownHTML": func(s string) template.HTML {
 			var buf bytes.Buffer
 			if err := r.md.Convert([]byte(s), &buf); err != nil {
+				return template.HTML(template.HTMLEscapeString(s))
+			}
+			return template.HTML(buf.String())
+		},
+		// markdownSafeHTML renders Markdown without raw HTML pass-through. Use it
+		// for admin-authored text that reaches unauthenticated pages, such as IDP
+		// descriptions on the login screen.
+		"markdownSafeHTML": func(s string) template.HTML {
+			var buf bytes.Buffer
+			if err := r.mdSafe.Convert([]byte(s), &buf); err != nil {
 				return template.HTML(template.HTMLEscapeString(s))
 			}
 			return template.HTML(buf.String())

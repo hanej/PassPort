@@ -191,7 +191,7 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 		_ = conn.Close()
 		if isLdapMustChangePassword(err) || isLdapPasswordExpired(err) {
 			// Password is valid; fall through to service account to complete the change.
-			return c.changePasswordAsService(ctx, userDN, newPassword)
+			return c.changePasswordAsService(ctx, userDN, oldPassword, newPassword)
 		}
 		if isLdapInvalidCredentials(err) {
 			return fmt.Errorf("current password is incorrect")
@@ -209,8 +209,13 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 
 	if err := conn.Modify(modReq); err != nil {
 		if isLdapPasswordPolicyViolation(err) {
-			return idp.ErrPasswordPolicy
+			// AD returns 0000052D for complexity, history AND minimum-age violations,
+			// so keep its raw text: the sentinel alone cannot tell them apart.
+			c.logger.Error("password change rejected by AD policy",
+				"user", user, "user_dn", userDN, "operation", "user-bind delete+add", "ldap_error", err.Error())
+			return fmt.Errorf("%w: %v", idp.ErrPasswordPolicy, err)
 		}
+		c.logger.Error("password change failed", "user", user, "user_dn", userDN, "ldap_error", err.Error())
 		return fmt.Errorf("changing password for %q: %w", userDN, err)
 	}
 	c.logger.Debug("password change successful", "user", user)
@@ -218,9 +223,12 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 	return nil
 }
 
-// changePasswordAsService performs a unicodePwd Replace via the service account.
-// Used when the user's bind is rejected due to must-change or expired state.
-func (c *Connector) changePasswordAsService(ctx context.Context, userDN, newPassword string) error {
+// changePasswordAsService completes a password change over the service account bind.
+// Used when the user's own bind is rejected due to must-change or expired state.
+// AD derives change-vs-set semantics from the modify form rather than the bound
+// identity (MS-ADTS 3.1.1.3.1.5), so this keeps the Delete+Add pair: a Replace here
+// would silently bypass password history.
+func (c *Connector) changePasswordAsService(ctx context.Context, userDN, oldPassword, newPassword string) error {
 	c.logger.Debug("changing password via service account (forced-change state)", "user_dn", userDN)
 	conn, err := c.bindAsService(ctx)
 	if err != nil {
@@ -229,15 +237,46 @@ func (c *Connector) changePasswordAsService(ctx context.Context, userDN, newPass
 	defer func() { _ = conn.Close() }()
 
 	modReq := ldap.NewModifyRequest(userDN, nil)
-	modReq.Replace("unicodePwd", []string{string(EncodePassword(newPassword))})
+	modReq.Delete("unicodePwd", []string{string(EncodePassword(oldPassword))})
+	modReq.Add("unicodePwd", []string{string(EncodePassword(newPassword))})
 
 	if err := conn.Modify(modReq); err != nil {
 		if isLdapPasswordPolicyViolation(err) {
-			return idp.ErrPasswordPolicy
+			c.logger.Error("password change rejected by AD policy",
+				"user_dn", userDN, "operation", "service-bind replace", "ldap_error", err.Error())
+			return fmt.Errorf("%w: %v", idp.ErrPasswordPolicy, err)
 		}
+		c.logger.Error("service account password change failed", "user_dn", userDN, "ldap_error", err.Error())
 		return fmt.Errorf("changing password for %q: %w", userDN, err)
 	}
 	c.logger.Debug("service account password change successful", "user_dn", userDN)
+	return nil
+}
+
+// ClearPasswordAge sets pwdLastSet to 0, which exempts the account from the domain's
+// minimum password age. AD accepts only 0 or -1 for this attribute, so the timestamp
+// cannot be backdated; 0 is the only way to make an immediate change legal. The next
+// successful password change sets it back to the current time.
+func (c *Connector) ClearPasswordAge(ctx context.Context, user string) error {
+	userDN, err := c.resolveUserDN(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	conn, err := c.bindAsService(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	modReq := ldap.NewModifyRequest(userDN, nil)
+	modReq.Replace("pwdLastSet", []string{"0"})
+
+	if err := conn.Modify(modReq); err != nil {
+		c.logger.Error("clearing pwdLastSet failed", "user_dn", userDN, "ldap_error", err.Error())
+		return fmt.Errorf("clearing password age for %q: %w", userDN, err)
+	}
+	c.logger.Debug("password age cleared", "user_dn", userDN)
 	return nil
 }
 
@@ -261,6 +300,7 @@ func (c *Connector) ResetPassword(ctx context.Context, user, newPassword string)
 	modReq.Replace("unicodePwd", []string{string(EncodePassword(newPassword))})
 
 	if err := conn.Modify(modReq); err != nil {
+		c.logger.Error("password reset failed", "user", user, "user_dn", userDN, "ldap_error", err.Error())
 		return fmt.Errorf("resetting password for %q: %w", userDN, err)
 	}
 	c.logger.Debug("password reset successful", "user", user)

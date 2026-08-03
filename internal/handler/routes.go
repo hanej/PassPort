@@ -40,6 +40,7 @@ type RouterConfig struct {
 	Link                *LinkHandler
 	Bootstrap           *BootstrapHandler
 	AdminIDP            *AdminIDPHandler
+	AdminIDPGroups      *AdminIDPGroupHandler
 	AdminSMTP           *AdminSMTPHandler
 	AdminGroups         *AdminGroupsHandler
 	AdminMappings       *AdminMappingsHandler
@@ -198,6 +199,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 						// IDP management
 						r.Get("/idp", cfg.AdminIDP.List)
+						r.Get("/idp/groups", cfg.AdminIDPGroups.Show)
+						r.Post("/idp/groups", cfg.AdminIDPGroups.Create)
+						r.Post("/idp/groups/arrange", cfg.AdminIDPGroups.Arrange)
+						r.Post("/idp/groups/{id}", cfg.AdminIDPGroups.Update)
+						r.Post("/idp/groups/{id}/delete", cfg.AdminIDPGroups.Delete)
 						r.Get("/idp/new", cfg.AdminIDP.ShowCreate)
 						r.Post("/idp", cfg.AdminIDP.Create)
 						r.Post("/idp/test-connection", cfg.AdminIDP.TestConnectionFromForm)

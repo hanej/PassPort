@@ -12,19 +12,21 @@ import (
 func (d *DB) ListIDPs(ctx context.Context) ([]IdentityProviderRecord, error) {
 	return d.queryIDPs(ctx, `
 		SELECT id, friendly_name, description, provider_type, enabled,
-		       logo_url, mfa_provider_id, config_json, secret_blob, created_at, updated_at
+		       logo_url, mfa_provider_id, config_json, secret_blob,
+		       group_id, display_order, created_at, updated_at
 		FROM identity_providers
-		ORDER BY friendly_name`)
+		ORDER BY display_order, friendly_name`)
 }
 
 // ListEnabledIDPs returns all enabled identity providers.
 func (d *DB) ListEnabledIDPs(ctx context.Context) ([]IdentityProviderRecord, error) {
 	return d.queryIDPs(ctx, `
 		SELECT id, friendly_name, description, provider_type, enabled,
-		       logo_url, mfa_provider_id, config_json, secret_blob, created_at, updated_at
+		       logo_url, mfa_provider_id, config_json, secret_blob,
+		       group_id, display_order, created_at, updated_at
 		FROM identity_providers
 		WHERE enabled = 1
-		ORDER BY friendly_name`)
+		ORDER BY display_order, friendly_name`)
 }
 
 // queryIDPs is a helper that executes a query and scans rows into IdentityProviderRecord slices.
@@ -60,10 +62,12 @@ func scanIDP(s scanner) (*IdentityProviderRecord, error) {
 	var enabled int64
 	var createdAt, updatedAt string
 	var mfaProviderID sql.NullString
+	var groupID sql.NullInt64
 
 	err := s.Scan(
 		&idp.ID, &idp.FriendlyName, &idp.Description, &idp.ProviderType,
-		&enabled, &idp.LogoURL, &mfaProviderID, &idp.ConfigJSON, &idp.SecretBlob, &createdAt, &updatedAt,
+		&enabled, &idp.LogoURL, &mfaProviderID, &idp.ConfigJSON, &idp.SecretBlob,
+		&groupID, &idp.DisplayOrder, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scanning identity provider: %w", err)
@@ -73,6 +77,10 @@ func scanIDP(s scanner) (*IdentityProviderRecord, error) {
 
 	if mfaProviderID.Valid {
 		idp.MFAProviderID = &mfaProviderID.String
+	}
+
+	if groupID.Valid {
+		idp.GroupID = &groupID.Int64
 	}
 
 	idp.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
@@ -91,7 +99,8 @@ func scanIDP(s scanner) (*IdentityProviderRecord, error) {
 func (d *DB) GetIDP(ctx context.Context, id string) (*IdentityProviderRecord, error) {
 	row := d.reader.QueryRowContext(ctx, `
 		SELECT id, friendly_name, description, provider_type, enabled,
-		       logo_url, mfa_provider_id, config_json, secret_blob, created_at, updated_at
+		       logo_url, mfa_provider_id, config_json, secret_blob,
+		       group_id, display_order, created_at, updated_at
 		FROM identity_providers
 		WHERE id = ?`, id)
 

@@ -63,7 +63,7 @@ func (h *AdminMappingsHandler) Show(w http.ResponseWriter, r *http.Request) {
 		Title:   "User Mappings",
 		Session: sess,
 		Data: map[string]any{
-			"IDPs":       idps,
+			"IDPs":       directoryIDPs(idps),
 			"ActivePage": "mappings",
 		},
 	})

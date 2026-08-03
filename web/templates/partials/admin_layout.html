@@ -16,6 +16,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link sidebar-link{{if eq .Data.ActivePage "idp-groups"}} active{{end}}" href="/admin/idp/groups">
+                            <i class="bi bi-collection me-2"></i>Provider Groups
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link sidebar-link{{if eq .Data.ActivePage "smtp"}} active{{end}}" href="/admin/smtp">
                             <i class="bi bi-envelope me-2"></i>SMTP Settings
                         </a>

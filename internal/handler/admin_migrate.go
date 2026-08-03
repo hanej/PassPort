@@ -281,8 +281,8 @@ func (h *AdminMigrateHandler) Import(w http.ResponseWriter, r *http.Request) {
 		SourceIP: r.RemoteAddr,
 		Action:   "config_imported",
 		Result:   category,
-		Details: fmt.Sprintf("Import: %d admins, %d IDPs, %d groups, %d mappings, SMTP=%v, %d MFA, branding=%v, %d templates, %d uploads, %d errors",
-			result.LocalAdmins, result.IDPs, result.AdminGroups, result.UserMappings,
+		Details: fmt.Sprintf("Import: %d admins, %d IDPs, %d provider groups, %d groups, %d mappings, SMTP=%v, %d MFA, branding=%v, %d templates, %d uploads, %d errors",
+			result.LocalAdmins, result.IDPs, result.IDPGroups, result.AdminGroups, result.UserMappings,
 			result.SMTP, result.MFAProviders, result.Branding, result.EmailTemplates, result.UploadFiles, len(result.Errors)),
 	})
 

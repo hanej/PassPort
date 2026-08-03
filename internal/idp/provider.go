@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,7 +29,9 @@ var (
 	ErrAccountLocked      = errors.New("account is locked out")
 	ErrAccountDisabled    = errors.New("account is disabled")
 	ErrAccountExpired     = errors.New("account has expired")
-	ErrPasswordPolicy     = errors.New("password does not meet policy requirements")
+	// ErrPasswordPolicy covers every rule AD reports as 0000052D: complexity,
+	// history and minimum age are indistinguishable in the response.
+	ErrPasswordPolicy = errors.New("password does not meet complexity, history, or minimum age requirements")
 )
 
 // ProviderType identifies the type of identity provider.
@@ -36,7 +40,48 @@ type ProviderType string
 const (
 	ProviderTypeAD      ProviderType = "ad"
 	ProviderTypeFreeIPA ProviderType = "freeipa"
+	// ProviderTypeWebLink is a non-directory provider that simply links out to
+	// an external site. It has no LDAP connection and no Provider implementation.
+	ProviderTypeWebLink ProviderType = "weblink"
 )
+
+// IsDirectory reports whether the provider type is backed by an LDAP directory.
+func (t ProviderType) IsDirectory() bool {
+	return t == ProviderTypeAD || t == ProviderTypeFreeIPA
+}
+
+// idPattern constrains provider slugs. A slug is the identity_providers primary
+// key and is interpolated into the uploaded logo filename, so it must stay
+// filesystem- and URL-safe.
+var idPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// ValidID reports whether s is an acceptable provider slug.
+func ValidID(s string) bool {
+	return idPattern.MatchString(s)
+}
+
+// NormalizeWebLinkURL validates a weblink target URL and returns it, or an
+// empty string if it is not an absolute http(s) URL. This blocks scheme-based
+// injection such as javascript: or data: URLs.
+func NormalizeWebLinkURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return ""
+	}
+	if u.Host == "" {
+		return ""
+	}
+	return u.String()
+}
 
 // Provider is the interface that all identity provider connectors must implement.
 type Provider interface {
@@ -77,6 +122,43 @@ type Provider interface {
 	ID() string
 }
 
+// PasswordAgeClearer is implemented by connectors that can exempt an account from
+// the directory's minimum password age. The self-service reset flow needs this
+// because it stages a temporary password first, which resets the age clock and
+// would otherwise make the user's own change illegal.
+type PasswordAgeClearer interface {
+	ClearPasswordAge(ctx context.Context, user string) error
+}
+
+// PasswordAgePolicy is implemented by connectors that can report the earliest time
+// the directory will accept a password change for a user. Connectors that also
+// implement PasswordAgeClearer must implement this, since clearing the age disables
+// the directory's own check and Passport has to apply the equivalent gate itself.
+// The zero time means a change is allowed now.
+type PasswordAgePolicy interface {
+	PasswordChangeAllowedAt(ctx context.Context, user string) (time.Time, error)
+}
+
+// PasswordPolicy describes the directory rules that can be evaluated before a
+// password is submitted. A zero MinLength means the length could not be determined.
+type PasswordPolicy struct {
+	MinLength         int
+	ComplexityEnabled bool
+	// SamAccountName and DisplayName support Active Directory's complexity rule
+	// that a password may contain neither the account name nor a token of the
+	// display name.
+	SamAccountName string
+	DisplayName    string
+}
+
+// PasswordPolicyReader is implemented by connectors that can report the password
+// rules applying to a specific user, which may differ from the domain default when
+// a fine-grained policy applies. Callers must treat an error as "unknown" and fall
+// back to their configured behaviour rather than blocking the user.
+type PasswordPolicyReader interface {
+	ResolvePasswordPolicy(ctx context.Context, user string) (PasswordPolicy, error)
+}
+
 // LDAPConnector abstracts LDAP connection creation for testability.
 type LDAPConnector interface {
 	Connect(ctx context.Context, endpoint, protocol string, timeout int, tlsSkipVerify bool) (LDAPConn, error)
@@ -110,6 +192,8 @@ type Config struct {
 	PasswordAllowSpecialChars bool   `json:"password_allow_special_chars"`
 	PasswordSpecialChars      string `json:"password_special_chars"`
 	PasswordLength            int    `json:"password_length"`
+	// URL is the external target for weblink providers.
+	URL string `json:"url,omitempty"`
 }
 
 // Secrets holds the sensitive configuration for an IDP (decrypted from secret_blob).

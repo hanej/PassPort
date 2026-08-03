@@ -253,6 +253,63 @@ func TestFuncMap_MarkdownHTML(t *testing.T) {
 	}
 }
 
+// TestFuncMap_MarkdownSafeHTML renders the real login page with hostile IDP
+// descriptions. Descriptions are admin-authored but surface on the
+// unauthenticated login page, so raw HTML and dangerous URL schemes must be
+// stripped rather than passed through.
+func TestFuncMap_MarkdownSafeHTML(t *testing.T) {
+	logger := testLogger()
+	r, err := NewRenderer("", logger)
+	if err != nil {
+		t.Fatalf("NewRenderer: %v", err)
+	}
+
+	cards := []LoginIDPCard{
+		{IdentityProviderRecord: db.IdentityProviderRecord{
+			ID: "a", FriendlyName: "Formatted", ProviderType: "ad",
+			Description: "**bold** and [Portal](https://portal.example.com)",
+		}},
+		{IdentityProviderRecord: db.IdentityProviderRecord{
+			ID: "b", FriendlyName: "Scripted", ProviderType: "ad",
+			Description: "<script>alert(1)</script><img src=x onerror=alert(2)>",
+		}},
+		{IdentityProviderRecord: db.IdentityProviderRecord{
+			ID: "c", FriendlyName: "Scheme", ProviderType: "ad",
+			Description: "[click](javascript:alert(1)) [data](data:text/html,<script>)",
+		}},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Render(w, req, "login.html", PageData{
+		Title: "Login",
+		Data:  map[string]any{"Sections": []LoginIDPSection{{IDPs: cards}}},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body excerpt: %s", w.Code, excerpt(w.Body.String()))
+	}
+	body := w.Body.String()
+
+	if !strings.Contains(body, "<strong>bold</strong>") {
+		t.Error("expected Markdown emphasis to be rendered")
+	}
+	if !strings.Contains(body, `href="https://portal.example.com"`) {
+		t.Error("expected Markdown link to be rendered")
+	}
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Error("raw <script> in a description must not reach the login page")
+	}
+	if strings.Contains(body, "onerror=alert(2)") {
+		t.Error("raw HTML attributes in a description must not reach the login page")
+	}
+	if strings.Contains(body, "javascript:alert(1)") {
+		t.Error("javascript: link destination must be stripped")
+	}
+	if strings.Contains(body, "data:text/html") {
+		t.Error("data: link destination must be stripped")
+	}
+}
+
 // excerpt returns the first 200 characters of s for error messages.
 func excerpt(s string) string {
 	if len(s) > 200 {

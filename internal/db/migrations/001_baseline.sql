@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS identity_providers (
     id                TEXT PRIMARY KEY,
     friendly_name     TEXT NOT NULL,
     description       TEXT NOT NULL DEFAULT '',
-    provider_type     TEXT NOT NULL CHECK (provider_type IN ('ad', 'freeipa')),
+    provider_type     TEXT NOT NULL CHECK (provider_type IN ('ad', 'freeipa', 'weblink')),
     enabled           INTEGER NOT NULL DEFAULT 1,
     config_json       TEXT NOT NULL DEFAULT '{}',
     secret_blob       BLOB,

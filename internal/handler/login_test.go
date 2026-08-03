@@ -82,7 +82,7 @@ func loginStubRenderer(t *testing.T) *Renderer {
 		"pages":    func(n int) []int { return nil },
 	}
 	pages := make(map[string]*template.Template)
-	pages["login.html"] = template.Must(template.New("login.html").Funcs(funcMap).Parse(`{{define "base"}}login page {{if .Flash}}{{.Flash.message}}{{end}} {{if .Data}}{{range .Data.IDPs}}{{.FriendlyName}}{{end}}{{end}}{{end}}`))
+	pages["login.html"] = template.Must(template.New("login.html").Funcs(funcMap).Parse(`{{define "base"}}login page {{if .Flash}}{{.Flash.message}}{{end}} {{if .Data}}{{range .Data.Sections}}{{range .IDPs}}{{.FriendlyName}}{{end}}{{end}}{{end}}{{end}}`))
 	pages["error.html"] = template.Must(template.New("error.html").Funcs(funcMap).Parse(`{{define "base"}}error page{{end}}`))
 	pages["dashboard.html"] = template.Must(template.New("dashboard.html").Funcs(funcMap).Parse(`{{define "base"}}dashboard{{end}}`))
 
@@ -201,10 +201,14 @@ func TestShowLoginRendersWithIDPList(t *testing.T) {
 			t.Errorf("listing IDPs: %v", err)
 			return
 		}
+		cards := make([]LoginIDPCard, len(idps))
+		for i, rec := range idps {
+			cards[i] = LoginIDPCard{IdentityProviderRecord: rec}
+		}
 		env.handler.renderer.Render(w, r, "login.html", PageData{
 			Title: "Login",
 			Data: map[string]any{
-				"IDPs": idps,
+				"Sections": []LoginIDPSection{{IDPs: cards}},
 			},
 		})
 	})

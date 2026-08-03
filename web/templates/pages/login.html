@@ -12,45 +12,89 @@
             {{if .Data}}
             {{with .Data}}
             <!-- Identity Provider Cards -->
-            <div class="row g-3 mb-4" id="provider-list">
-                {{range .IDPs}}
-                <div class="col-12">
-                    <div class="card idp-card idp-card-{{.ProviderType}} provider-select-card" role="button"
-                         data-provider-id="{{.ID}}" data-provider-name="{{.FriendlyName}}"
-                         data-provider-logo="{{.LogoURL}}">
-                        <div class="card-body d-flex align-items-center">
-                            {{if .LogoURL}}
-                            <img src="{{.LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
-                            {{end}}
-                            <div class="flex-grow-1">
-                                <h5 class="card-title mb-1">{{.FriendlyName}}</h5>
-                                {{if .Description}}
-                                <p class="card-text text-muted small mb-0">{{.Description}}</p>
-                                {{end}}
+            <div class="mb-4" id="provider-list">
+                {{range .Sections}}
+                <div class="idp-group mb-3{{if .Group}} idp-group-titled{{end}}">
+                    {{if .Group}}
+                    {{if .Group.Collapsible}}
+                    <a class="idp-group-heading mb-2{{if .Group.StartCollapsed}} collapsed{{end}}" data-bs-toggle="collapse"
+                       href="#idp-group-{{.Group.ID}}" role="button"
+                       aria-expanded="{{if .Group.StartCollapsed}}false{{else}}true{{end}}" aria-controls="idp-group-{{.Group.ID}}">
+                        <i class="bi bi-chevron-down idp-group-caret"></i>
+                        {{if .Group.Icon}}<i class="bi {{.Group.Icon}}"></i>{{end}}
+                        <span>{{.Group.Name}}</span>
+                    </a>
+                    {{else}}
+                    <div class="idp-group-heading mb-2">
+                        {{if .Group.Icon}}<i class="bi {{.Group.Icon}}"></i>{{end}}
+                        <span>{{.Group.Name}}</span>
+                    </div>
+                    {{end}}
+                    {{if .Group.Description}}
+                    <div class="text-muted small mb-2 idp-description">{{markdownSafeHTML .Group.Description}}</div>
+                    {{end}}
+                    {{end}}
+
+                    <div class="row g-3{{if and .Group .Group.Collapsible}} collapse{{if not .Group.StartCollapsed}} show{{end}}{{end}}"
+                         {{if and .Group .Group.Collapsible}}id="idp-group-{{.Group.ID}}"{{end}}>
+                        {{range .IDPs}}
+                        <div class="col-12">
+                            {{if .IsLocal}}
+                            <div class="card idp-card idp-card-local provider-select-card" role="button"
+                                 data-provider-id="local" data-provider-name="Local Admin"
+                                 data-provider-logo="{{(branding).LogoURL}}">
+                                <div class="card-body d-flex align-items-center">
+                                    {{if (branding).LogoURL}}
+                                    <img src="{{(branding).LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
+                                    {{end}}
+                                    <div class="flex-grow-1">
+                                        <h5 class="card-title mb-1">Local Admin</h5>
+                                        <p class="card-text text-muted small mb-0">Built-in administrator account</p>
+                                    </div>
+                                    <i class="bi bi-chevron-right ms-3 text-muted"></i>
+                                </div>
                             </div>
-                            <i class="bi bi-chevron-right ms-3 text-muted"></i>
+                            {{else if .WebLinkURL}}
+                            <div class="card idp-card idp-card-weblink weblink-card position-relative">
+                                <div class="card-body d-flex align-items-center">
+                                    {{if .LogoURL}}
+                                    <img src="{{.LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
+                                    {{end}}
+                                    <div class="flex-grow-1">
+                                        <h5 class="card-title mb-1">
+                                            <a class="stretched-link text-decoration-none text-reset"
+                                               href="{{.WebLinkURL}}" target="_blank" rel="noopener noreferrer">{{.FriendlyName}}</a>
+                                        </h5>
+                                        {{if .Description}}
+                                        <div class="card-text text-muted small idp-description">{{markdownSafeHTML .Description}}</div>
+                                        {{end}}
+                                    </div>
+                                    <i class="bi bi-box-arrow-up-right ms-3 text-muted"></i>
+                                </div>
+                            </div>
+                            {{else}}
+                            <div class="card idp-card idp-card-{{.ProviderType}} provider-select-card" role="button"
+                                 data-provider-id="{{.ID}}" data-provider-name="{{.FriendlyName}}"
+                                 data-provider-logo="{{.LogoURL}}">
+                                <div class="card-body d-flex align-items-center">
+                                    {{if .LogoURL}}
+                                    <img src="{{.LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
+                                    {{end}}
+                                    <div class="flex-grow-1">
+                                        <h5 class="card-title mb-1">{{.FriendlyName}}</h5>
+                                        {{if .Description}}
+                                        <div class="card-text text-muted small idp-description">{{markdownSafeHTML .Description}}</div>
+                                        {{end}}
+                                    </div>
+                                    <i class="bi bi-chevron-right ms-3 text-muted"></i>
+                                </div>
+                            </div>
+                            {{end}}
                         </div>
+                        {{end}}
                     </div>
                 </div>
                 {{end}}
-
-                <!-- Local Admin Card -->
-                <div class="col-12">
-                    <div class="card idp-card idp-card-local provider-select-card" role="button"
-                         data-provider-id="local" data-provider-name="Local Admin"
-                         data-provider-logo="{{(branding).LogoURL}}">
-                        <div class="card-body d-flex align-items-center">
-                            {{if (branding).LogoURL}}
-                            <img src="{{(branding).LogoURL}}" alt="" height="36" class="me-3" style="flex-shrink: 0;">
-                            {{end}}
-                            <div class="flex-grow-1">
-                                <h5 class="card-title mb-1">Local Admin</h5>
-                                <p class="card-text text-muted small mb-0">Built-in administrator account</p>
-                            </div>
-                            <i class="bi bi-chevron-right ms-3 text-muted"></i>
-                        </div>
-                    </div>
-                </div>
             </div>
             {{end}}
             {{end}}

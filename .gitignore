@@ -1,5 +1,7 @@
 # Binaries
 bin/
+scripts/adcheck
+scripts/adcheck-linux-amd64
 
 # Build output
 dist/

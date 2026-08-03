@@ -81,6 +81,11 @@ func (e *Engine) CorrelateUser(ctx context.Context, authProviderID, authUsername
 	var results []MappingResult
 
 	for _, target := range enabledIDPs {
+		// Weblink providers have no directory to correlate against.
+		if !idp.ProviderType(target.ProviderType).IsDirectory() {
+			continue
+		}
+
 		result := MappingResult{
 			IDPID:           target.ID,
 			IDPFriendlyName: target.FriendlyName,

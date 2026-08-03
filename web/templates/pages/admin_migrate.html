@@ -110,6 +110,7 @@
             <tbody>
                 {{if $r.LocalAdmins}}<tr><td>Local Admins</td><td>{{$r.LocalAdmins}} imported</td></tr>{{end}}
                 {{if $r.IDPs}}<tr><td>Identity Providers</td><td>{{$r.IDPs}} imported</td></tr>{{end}}
+                {{if $r.IDPGroups}}<tr><td>Provider Groups</td><td>{{$r.IDPGroups}} imported</td></tr>{{end}}
                 {{if $r.AdminGroups}}<tr><td>Admin Groups</td><td>{{$r.AdminGroups}} imported</td></tr>{{end}}
                 {{if $r.UserMappings}}<tr><td>User Mappings</td><td>{{$r.UserMappings}} imported</td></tr>{{end}}
                 {{if $r.SMTP}}<tr><td>SMTP Settings</td><td>Imported</td></tr>{{end}}

@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', function () {
     initDryRun();
     initRunNow();
     initPasswordPolicyToggles();
+    initMarkdownToolbars();
+    initDescriptionLinks();
+    initIDPArrangement();
+    initGroupModals();
     initUnsavedChangesWarning();
 
     // Initialize Bootstrap tooltips on elements with data-bs-toggle="tooltip".
@@ -53,6 +57,70 @@ function initPasswordToggles() {
     });
 }
 
+/* ---- Password Policy Validation ---- */
+
+/*
+ * Mirrors Active Directory's complexity rule (MS-ADTS 3.1.1.13.1): three of five
+ * character categories, and the password may contain neither the account name nor
+ * any three-or-more character token of the display name. This is guidance only —
+ * the directory still decides, and it alone knows the password history.
+ */
+function evaluatePasswordRules(rules, value) {
+    var results = {};
+
+    results.length = value.length >= rules.minLength;
+
+    if (!rules.complexity) return results;
+
+    var categories = 0;
+    if (/[A-Z]/.test(value)) categories++;
+    if (/[a-z]/.test(value)) categories++;
+    if (/[0-9]/.test(value)) categories++;
+    if (/[^A-Za-z0-9]/.test(value)) categories++;
+    results.categories = categories >= 3;
+
+    var lower = value.toLowerCase();
+    var ok = true;
+    if (rules.accountName && rules.accountName.length >= 3) {
+        if (lower.indexOf(rules.accountName.toLowerCase()) !== -1) ok = false;
+    }
+    (rules.displayName || '').split(/[,.\-_#\s\t]+/).forEach(function (token) {
+        if (token.length >= 3 && lower.indexOf(token.toLowerCase()) !== -1) ok = false;
+    });
+    results.name = ok;
+
+    return results;
+}
+
+function readPasswordRules(form) {
+    var el = form.querySelector('.password-rules');
+    if (!el) return null;
+    return {
+        element: el,
+        minLength: parseInt(el.getAttribute('data-min-length'), 10) || 0,
+        complexity: el.getAttribute('data-complexity') === '1',
+        accountName: el.getAttribute('data-account-name') || '',
+        displayName: el.getAttribute('data-display-name') || ''
+    };
+}
+
+function renderPasswordRules(rules, results, touched) {
+    var allMet = true;
+    rules.element.querySelectorAll('.password-rule').forEach(function (li) {
+        var met = results[li.getAttribute('data-rule')];
+        if (met === false) allMet = false;
+        var icon = li.querySelector('i');
+        if (!touched) {
+            li.className = 'password-rule';
+            if (icon) icon.className = 'bi bi-circle me-1';
+            return;
+        }
+        li.className = 'password-rule ' + (met ? 'rule-met' : 'rule-unmet');
+        if (icon) icon.className = met ? 'bi bi-check-circle-fill me-1' : 'bi bi-circle me-1';
+    });
+    return allMet;
+}
+
 /* ---- Password Match Validation ---- */
 
 function initPasswordMatchValidation() {
@@ -65,10 +133,17 @@ function initPasswordMatchValidation() {
 
         // Find the match indicator — look for it within the form or by ID
         var indicator = form.querySelector('.password-match-indicator');
+        var rules = readPasswordRules(form);
 
         function validate() {
             var newVal = newPw.value;
             var confirmVal = confirmPw.value;
+
+            // Absent policy data leaves the form behaving exactly as before.
+            var policyMet = true;
+            if (rules) {
+                policyMet = renderPasswordRules(rules, evaluatePasswordRules(rules, newVal), newVal.length > 0);
+            }
 
             if (!confirmVal) {
                 if (indicator) {
@@ -84,7 +159,7 @@ function initPasswordMatchValidation() {
                     indicator.textContent = ' Passwords match';
                     indicator.className = 'password-match-indicator mt-1 match';
                 }
-                submitBtn.disabled = false;
+                submitBtn.disabled = !policyMet;
             } else {
                 if (indicator) {
                     indicator.textContent = ' Passwords do not match';
@@ -203,6 +278,21 @@ function initTestConnectionButtons() {
         var resultSpan = document.getElementById('test-connection-result');
         var csrf = getCSRFToken();
         var form = testBtn.closest('form') || document.querySelector('form');
+
+        // Weblink providers have no directory: "test" just opens the target URL.
+        // window.open must run synchronously in the click handler to avoid popup blocking.
+        var typeSelect = form.querySelector('[name="provider_type"]');
+        if (typeSelect && typeSelect.value === 'weblink') {
+            var urlInput = form.querySelector('[name="weblink_url"]');
+            var url = urlInput ? urlInput.value.trim() : '';
+            if (!/^https?:\/\//i.test(url)) {
+                resultSpan.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Enter a valid http:// or https:// URL</span>';
+                return;
+            }
+            window.open(url, '_blank', 'noopener,noreferrer');
+            resultSpan.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Opened in a new window</span>';
+            return;
+        }
 
         testBtn.disabled = true;
         resultSpan.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Testing...</span>';
@@ -1070,4 +1160,594 @@ function initUnsavedChangesWarning() {
     window.addEventListener('beforeunload', function(e) {
         if (dirty) { e.preventDefault(); e.returnValue = ''; }
     });
+}
+
+/* ---- Markdown Toolbar ---- */
+
+function initMarkdownToolbars() {
+    document.querySelectorAll('[data-md-editor]').forEach(function(editor) {
+        var textarea = editor.querySelector('textarea');
+        if (!textarea) return;
+
+        editor.querySelectorAll('[data-md-action]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                applyMarkdownAction(textarea, btn.getAttribute('data-md-action'));
+            });
+        });
+    });
+}
+
+// mdReplace swaps the [start, end) range for text and leaves the caret selecting
+// [selStart, selEnd) relative to the start of the inserted text.
+function mdReplace(el, start, end, text, selStart, selEnd) {
+    el.setRangeText(text, start, end, 'end');
+    el.focus();
+    el.setSelectionRange(start + selStart, start + selEnd);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function applyMarkdownAction(el, action) {
+    var start = el.selectionStart;
+    var end = el.selectionEnd;
+    var selected = el.value.slice(start, end);
+
+    var wrappers = {
+        bold: { open: '**', close: '**', placeholder: 'bold text' },
+        italic: { open: '*', close: '*', placeholder: 'italic text' },
+        code: { open: '`', close: '`', placeholder: 'code' },
+        // Raw HTML, so only offered on fields rendered with inline HTML enabled.
+        underline: { open: '<u>', close: '</u>', placeholder: 'underlined text' }
+    };
+
+    if (wrappers[action]) {
+        var w = wrappers[action];
+        var body = selected || w.placeholder;
+        mdReplace(el, start, end, w.open + body + w.close,
+            w.open.length, w.open.length + body.length);
+        return;
+    }
+
+    if (action === 'link') {
+        var label = selected || 'link text';
+        var out = '[' + label + '](https://)';
+        // Select the URL so the next keystroke replaces it.
+        mdReplace(el, start, end, out, label.length + 3, out.length - 1);
+        return;
+    }
+
+    if (action === 'ul' || action === 'ol') {
+        // Expand the range to whole lines so prefixes land in column 0.
+        var lineStart = el.value.lastIndexOf('\n', start - 1) + 1;
+        var lineEnd = el.value.indexOf('\n', end);
+        if (lineEnd === -1) lineEnd = el.value.length;
+
+        var block = el.value.slice(lineStart, lineEnd) || 'list item';
+        var n = 0;
+        var prefixed = block.split('\n').map(function(line) {
+            n++;
+            return (action === 'ul' ? '- ' : n + '. ') + line;
+        }).join('\n');
+
+        // A list needs a blank line before it to start a new block.
+        var lead = (lineStart > 0 && el.value[lineStart - 1] !== '\n') ? '\n' : '';
+        mdReplace(el, lineStart, lineEnd, lead + prefixed, lead.length, lead.length + prefixed.length);
+    }
+}
+
+/* ---- Markdown Links in IDP Descriptions ---- */
+
+// Descriptions are rendered server-side, so links get their target and click
+// behaviour wired up here rather than in the Markdown output.
+function initDescriptionLinks() {
+    document.querySelectorAll('.idp-description a').forEach(function(link) {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+        // Inside a selectable provider card, following the link must not also
+        // trigger the card's "sign in with this provider" handler.
+        link.addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    });
+}
+
+/* ---- Provider Group Arrangement (drag and drop) ---- */
+
+function initIDPArrangement() {
+    var root = document.getElementById('arrangement');
+    if (!root) return;
+
+    var saveBtn = document.getElementById('save-arrangement');
+    var hint = document.getElementById('arrange-hint');
+    var groupList = document.getElementById('group-list');
+
+    // Chromium cancels a drag if the DOM is mutated inside `dragstart`, and
+    // again if the source element stops being rendered. So nothing moves until
+    // `dragover`, the source is only dimmed, and a drag that ends without a
+    // drop is rewound to where it started.
+    var dragged = null;
+    var originParent = null;
+    var originNext = null;
+    var dropped = false;
+
+    function markDirty() {
+        if (saveBtn.disabled) {
+            saveBtn.disabled = false;
+            if (hint) hint.textContent = 'Unsaved changes.';
+        }
+    }
+
+    function isChipDrag() {
+        return dragged !== null && dragged.classList.contains('idp-chip');
+    }
+
+    function isGroupDrag() {
+        return dragged !== null && dragged.classList.contains('group-card');
+    }
+
+    function beginDrag(el, e) {
+        dragged = el;
+        originParent = el.parentElement;
+        originNext = el.nextElementSibling;
+        dropped = false;
+
+        e.dataTransfer.effectAllowed = 'move';
+        // Firefox requires data to be set for the drag to start.
+        e.dataTransfer.setData('text/plain', el.dataset.idpId || el.dataset.groupId || '');
+        // Dimming has to wait a tick, or the browser snapshots a faded drag image.
+        window.setTimeout(function () {
+            if (dragged === el) el.classList.add('drag-ghost');
+        }, 0);
+    }
+
+    function endDrag() {
+        if (!dragged) return;
+        var el = dragged;
+        el.classList.remove('drag-ghost');
+        root.querySelectorAll('.dropzone-active').forEach(function (zone) {
+            zone.classList.remove('dropzone-active');
+        });
+
+        // Escape, or a release outside any list, rewinds the live reordering.
+        if (!dropped) {
+            if (originParent) originParent.insertBefore(el, originNext);
+        } else if (el.parentElement !== originParent || el.nextElementSibling !== originNext) {
+            markDirty();
+        }
+
+        dragged = null;
+        originParent = null;
+        originNext = null;
+        dropped = false;
+    }
+
+    // Slots the dragged element before the first item whose midpoint is below
+    // the pointer, or at the end of the list.
+    function moveDragged(container, selector, y) {
+        var items = container.querySelectorAll(selector);
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] === dragged) continue;
+            var box = items[i].getBoundingClientRect();
+            if (y < box.top + box.height / 2) {
+                container.insertBefore(dragged, items[i]);
+                return;
+            }
+        }
+        container.appendChild(dragged);
+    }
+
+    // Providers are dragged between the dropzone lists.
+    root.querySelectorAll('.idp-chip').forEach(function (chip) {
+        chip.addEventListener('dragstart', function (e) {
+            beginDrag(chip, e);
+            // Dragging a chip must not also start a drag of its group card.
+            e.stopPropagation();
+        });
+        chip.addEventListener('dragend', function (e) {
+            // Otherwise the enclosing card's dragend handler runs as well.
+            e.stopPropagation();
+            endDrag();
+        });
+    });
+
+    root.querySelectorAll('.idp-dropzone').forEach(function (zone) {
+        // Safari and Firefox only honour a drop target if dragenter is
+        // cancelled as well as dragover.
+        zone.addEventListener('dragenter', function (e) {
+            if (!isChipDrag()) return;
+            e.preventDefault();
+        });
+        zone.addEventListener('dragover', function (e) {
+            if (!isChipDrag()) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            zone.classList.add('dropzone-active');
+            moveDragged(zone, '.idp-chip', e.clientY);
+        });
+        zone.addEventListener('dragleave', function (e) {
+            // dragleave also fires when the pointer crosses onto a child.
+            if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
+            zone.classList.remove('dropzone-active');
+        });
+        zone.addEventListener('drop', function (e) {
+            if (!isChipDrag()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dropped = true;
+        });
+    });
+
+    // Group cards are dragged to reorder the groups themselves.
+    if (groupList) {
+        groupList.querySelectorAll('.group-card').forEach(function (card) {
+            card.addEventListener('dragstart', function (e) {
+                beginDrag(card, e);
+            });
+            card.addEventListener('dragend', function () {
+                endDrag();
+            });
+        });
+
+        groupList.addEventListener('dragenter', function (e) {
+            if (!isGroupDrag()) return;
+            e.preventDefault();
+        });
+        groupList.addEventListener('dragover', function (e) {
+            if (!isGroupDrag()) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            moveDragged(groupList, '.group-card', e.clientY);
+        });
+        groupList.addEventListener('drop', function (e) {
+            if (!isGroupDrag()) return;
+            e.preventDefault();
+            dropped = true;
+        });
+    }
+
+    // Keyboard/pointer fallback so arranging never requires dragging.
+    root.addEventListener('click', function (e) {
+        var chipBtn = e.target.closest('[data-idp-move]');
+        if (chipBtn) {
+            if (moveChip(chipBtn.closest('.idp-chip'), chipBtn.dataset.idpMove)) markDirty();
+            return;
+        }
+        var groupBtn = e.target.closest('[data-group-move]');
+        if (groupBtn && groupList) {
+            if (moveGroup(groupBtn.closest('.group-card'), groupBtn.dataset.groupMove)) markDirty();
+        }
+    });
+
+    // Past the edge of its list a provider hops into the neighbouring group, so
+    // every placement the drag UI allows is reachable without a mouse.
+    function moveChip(chip, direction) {
+        if (!chip) return false;
+        var zone = chip.parentElement;
+        var chips = Array.prototype.slice.call(zone.querySelectorAll('.idp-chip'));
+        var idx = chips.indexOf(chip);
+        if (direction === 'up' && idx > 0) {
+            zone.insertBefore(chip, chips[idx - 1]);
+            return true;
+        }
+        if (direction === 'down' && idx > -1 && idx < chips.length - 1) {
+            zone.insertBefore(chips[idx + 1], chip);
+            return true;
+        }
+
+        var zones = Array.prototype.slice.call(root.querySelectorAll('.idp-dropzone'));
+        var z = zones.indexOf(zone);
+        if (direction === 'up' && z > 0) {
+            zones[z - 1].appendChild(chip);
+            return true;
+        }
+        if (direction === 'down' && z > -1 && z < zones.length - 1) {
+            zones[z + 1].insertBefore(chip, zones[z + 1].firstElementChild);
+            return true;
+        }
+        return false;
+    }
+
+    function moveGroup(card, direction) {
+        if (!card) return false;
+        var cards = Array.prototype.slice.call(groupList.querySelectorAll('.group-card'));
+        var idx = cards.indexOf(card);
+        if (direction === 'up' && idx > 0) {
+            groupList.insertBefore(card, cards[idx - 1]);
+            return true;
+        }
+        if (direction === 'down' && idx > -1 && idx < cards.length - 1) {
+            groupList.insertBefore(cards[idx + 1], card);
+            return true;
+        }
+        return false;
+    }
+
+    saveBtn.addEventListener('click', function () {
+        var payload = {
+            group_order: [],
+            sections: []
+        };
+
+        root.querySelectorAll('.idp-dropzone').forEach(function (zone) {
+            var raw = zone.dataset.groupId;
+            var groupID = raw === '' ? null : parseInt(raw, 10);
+            if (groupID !== null) payload.group_order.push(groupID);
+            payload.sections.push({
+                group_id: groupID,
+                idp_ids: Array.prototype.slice.call(zone.querySelectorAll('.idp-chip')).map(function (c) {
+                    return c.dataset.idpId;
+                })
+            });
+        });
+
+        saveBtn.disabled = true;
+        fetch(root.dataset.arrangeUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-Token': getCSRFToken()
+            },
+            body: JSON.stringify(payload)
+        }).then(function (res) {
+            return res.json().then(function (body) {
+                return { ok: res.ok, body: body };
+            });
+        }).then(function (result) {
+            if (result.ok) {
+                showArrangeStatus('success', 'Arrangement saved.');
+                if (hint) hint.textContent = 'All changes saved.';
+            } else {
+                saveBtn.disabled = false;
+                showArrangeStatus('danger', result.body.error || 'Failed to save arrangement.');
+            }
+        }).catch(function () {
+            saveBtn.disabled = false;
+            showArrangeStatus('danger', 'Failed to save arrangement.');
+        });
+    });
+
+    function showArrangeStatus(kind, message) {
+        var box = document.getElementById('arrange-status');
+        if (!box) return;
+        box.className = 'alert alert-' + kind;
+        box.textContent = message;
+    }
+}
+
+/* ---- Provider Group Create/Edit/Delete Modals ---- */
+
+// Fallback shown if the Bootstrap Icons stylesheet cannot be read (offline, or
+// a CDN block). The full set is loaded from that stylesheet instead of being
+// hardcoded, so the picker can never drift from the version actually linked.
+var GROUP_ICON_FALLBACK = [
+    'bi-building', 'bi-buildings', 'bi-bank', 'bi-house', 'bi-house-door', 'bi-shop',
+    'bi-briefcase', 'bi-globe', 'bi-globe2', 'bi-geo-alt', 'bi-flag', 'bi-diagram-3',
+    'bi-people', 'bi-person', 'bi-person-badge', 'bi-person-circle', 'bi-person-gear',
+    'bi-person-vcard', 'bi-person-workspace', 'bi-people-fill', 'bi-person-lines-fill',
+    'bi-shield', 'bi-shield-lock', 'bi-shield-check', 'bi-shield-shaded', 'bi-lock',
+    'bi-unlock', 'bi-key', 'bi-fingerprint', 'bi-incognito', 'bi-patch-check',
+    'bi-server', 'bi-hdd-network', 'bi-hdd-stack', 'bi-database', 'bi-cloud',
+    'bi-cloud-check', 'bi-router', 'bi-ethernet', 'bi-cpu', 'bi-motherboard',
+    'bi-pc-display', 'bi-laptop', 'bi-phone', 'bi-tablet', 'bi-display',
+    'bi-window', 'bi-terminal', 'bi-code-slash', 'bi-braces', 'bi-bug',
+    'bi-gear', 'bi-gear-wide-connected', 'bi-sliders', 'bi-tools', 'bi-wrench',
+    'bi-folder', 'bi-folder2-open', 'bi-archive', 'bi-box', 'bi-boxes',
+    'bi-journal', 'bi-journals', 'bi-book', 'bi-file-earmark-text', 'bi-clipboard-data',
+    'bi-link-45deg', 'bi-box-arrow-up-right', 'bi-envelope', 'bi-chat-dots', 'bi-telephone',
+    'bi-mortarboard', 'bi-hospital', 'bi-heart-pulse', 'bi-cart', 'bi-cash-coin',
+    'bi-truck', 'bi-airplane', 'bi-lightning-charge', 'bi-star',
+    'bi-bookmark', 'bi-tag', 'bi-tags', 'bi-grid', 'bi-grid-3x3-gap',
+    'bi-list-ul', 'bi-collection', 'bi-stack', 'bi-puzzle', 'bi-three-dots'
+];
+
+// Icons are appended a page at a time as the grid is scrolled; drawing all
+// ~2000 buttons up front is slow enough to be noticeable.
+var GROUP_ICON_PAGE_SIZE = 120;
+
+// loadBootstrapIconNames reads every icon class out of the linked Bootstrap
+// Icons stylesheet. It is fetched rather than read from document.styleSheets
+// because a CDN stylesheet is cross-origin and cssRules therefore throws.
+function loadBootstrapIconNames() {
+    var link = document.querySelector('link[href*="bootstrap-icons"]');
+    if (!link) return Promise.resolve(null);
+
+    return fetch(link.href).then(function (res) {
+        return res.ok ? res.text() : null;
+    }).then(function (css) {
+        if (!css) return null;
+        var names = [];
+        var seen = Object.create(null);
+        // The font declares one `.bi-name::before { content: "..." }` rule per icon.
+        var re = /\.bi-([a-z0-9-]+)::?before/g;
+        var m;
+        while ((m = re.exec(css)) !== null) {
+            if (seen[m[1]]) continue;
+            seen[m[1]] = true;
+            names.push('bi-' + m[1]);
+        }
+        return names.length ? names.sort() : null;
+    }).catch(function () {
+        return null;
+    });
+}
+
+function initGroupIconPicker() {
+    var input = document.getElementById('group-icon');
+    var grid = document.getElementById('group-icon-grid');
+    if (!input || !grid) return null;
+
+    var preview = document.getElementById('group-icon-preview');
+    var picker = document.getElementById('group-icon-picker');
+    var browse = document.getElementById('group-icon-browse');
+    var search = document.getElementById('group-icon-search');
+    var status = document.getElementById('group-icon-status');
+
+    var icons = GROUP_ICON_FALLBACK.slice().sort();
+    var loaded = false;
+    var matches = icons;
+    var drawn = 0;
+
+    function makeItem(name, selected) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'icon-picker-item' + (name === selected ? ' selected' : '');
+        btn.dataset.icon = name;
+        btn.title = name;
+        btn.setAttribute('role', 'option');
+        btn.setAttribute('aria-label', name);
+        var i = document.createElement('i');
+        i.className = 'bi ' + name;
+        btn.appendChild(i);
+        return btn;
+    }
+
+    // Appends the next page and keeps going until the grid overflows, so a tall
+    // window does not leave a short list with nothing left to scroll.
+    function drawMore() {
+        var selected = input.value.trim();
+        while (drawn < matches.length) {
+            var frag = document.createDocumentFragment();
+            var end = Math.min(drawn + GROUP_ICON_PAGE_SIZE, matches.length);
+            for (; drawn < end; drawn++) {
+                frag.appendChild(makeItem(matches[drawn], selected));
+            }
+            grid.appendChild(frag);
+            if (grid.scrollHeight > grid.clientHeight) break;
+        }
+        status.textContent = matches.length
+            ? matches.length + (matches.length === 1 ? ' icon' : ' icons')
+            : 'No icons match that search.';
+    }
+
+    function render() {
+        var q = search.value.trim().toLowerCase();
+        var selected = input.value.trim();
+        matches = q ? icons.filter(function (n) { return n.indexOf(q) !== -1; }) : icons;
+        // Pin the current icon to the front so it is visible without scrolling
+        // to wherever it happens to sort.
+        if (selected && matches.indexOf(selected) > 0) {
+            matches = [selected].concat(matches.filter(function (n) { return n !== selected; }));
+        }
+        // Removing a hovered item would strand its tooltip on the body.
+        grid.querySelectorAll('.icon-picker-item').forEach(function (btn) {
+            var tip = bootstrap.Tooltip.getInstance(btn);
+            if (tip) tip.dispose();
+        });
+        grid.replaceChildren();
+        grid.scrollTop = 0;
+        drawn = 0;
+        drawMore();
+    }
+
+    // Delegated so items appended while scrolling get a tooltip for free, and
+    // anchored to the body so the scrolling grid cannot clip it.
+    new bootstrap.Tooltip(grid, {
+        selector: '.icon-picker-item',
+        container: 'body',
+        delay: { show: 200, hide: 0 },
+    });
+
+    var shownTip = null;
+    grid.addEventListener('inserted.bs.tooltip', function (e) { shownTip = e.target; });
+    grid.addEventListener('hidden.bs.tooltip', function () { shownTip = null; });
+
+    grid.addEventListener('scroll', function () {
+        // Being anchored to the body, an open tooltip would otherwise ride its
+        // item up and out of the grid.
+        if (shownTip) {
+            var tip = bootstrap.Tooltip.getInstance(shownTip);
+            if (tip) tip.hide();
+        }
+        if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 96) drawMore();
+    });
+
+    function syncPreview() {
+        var name = input.value.trim();
+        // Anything outside the bi-* namespace would be dropped server-side, so
+        // show the placeholder rather than a misleading icon.
+        var valid = /^bi-[a-z0-9-]+$/.test(name);
+        preview.firstElementChild.className = 'bi ' + (valid ? name : 'bi-app');
+        grid.querySelectorAll('.icon-picker-item').forEach(function (btn) {
+            btn.classList.toggle('selected', btn.dataset.icon === name);
+        });
+    }
+
+    function setOpen(open) {
+        picker.classList.toggle('d-none', !open);
+        browse.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!open) return;
+        search.focus();
+        if (loaded) return;
+        loaded = true;
+        loadBootstrapIconNames().then(function (names) {
+            if (!names) return;
+            icons = names;
+            render();
+        });
+    }
+
+    browse.addEventListener('click', function () {
+        setOpen(picker.classList.contains('d-none'));
+    });
+
+    grid.addEventListener('click', function (e) {
+        var btn = e.target.closest('.icon-picker-item');
+        if (!btn) return;
+        // Clicking the selected icon clears it, so an icon can be removed
+        // without editing the text field.
+        input.value = btn.classList.contains('selected') ? '' : btn.dataset.icon;
+        syncPreview();
+    });
+
+    input.addEventListener('input', syncPreview);
+    search.addEventListener('input', render);
+    render();
+
+    return { reset: function () { search.value = ''; render(); setOpen(false); syncPreview(); } };
+}
+
+function initGroupModals() {
+    var modal = document.getElementById('group-modal');
+    var iconPicker = initGroupIconPicker();
+
+    if (modal) {
+        var collapsible = document.getElementById('group-collapsible');
+        var startCollapsed = document.getElementById('group-start-collapsed');
+        var startWrap = document.getElementById('group-start-collapsed-wrap');
+
+        // Starting collapsed is meaningless if users cannot expand the group.
+        function syncStartCollapsed() {
+            startWrap.classList.toggle('d-none', !collapsible.checked);
+            if (!collapsible.checked) startCollapsed.checked = false;
+        }
+        collapsible.addEventListener('change', syncStartCollapsed);
+
+        modal.addEventListener('show.bs.modal', function (e) {
+            var trigger = e.relatedTarget;
+            if (!trigger) return;
+            var edit = trigger.dataset.groupMode === 'edit';
+            var form = document.getElementById('group-form');
+
+            document.getElementById('group-modal-title').textContent = edit ? 'Edit Group' : 'Add Group';
+            form.action = edit ? '/admin/idp/groups/' + trigger.dataset.groupId : '/admin/idp/groups';
+            document.getElementById('group-name').value = edit ? trigger.dataset.groupName : '';
+            document.getElementById('group-description').value = edit ? trigger.dataset.groupDescription : '';
+            document.getElementById('group-icon').value = edit ? trigger.dataset.groupIcon : '';
+            collapsible.checked = edit && trigger.dataset.groupCollapsible === '1';
+            startCollapsed.checked = edit && trigger.dataset.groupStartCollapsed === '1';
+            syncStartCollapsed();
+            if (iconPicker) iconPicker.reset();
+        });
+    }
+
+    var deleteModal = document.getElementById('delete-group-modal');
+    if (deleteModal) {
+        deleteModal.addEventListener('show.bs.modal', function (e) {
+            var trigger = e.relatedTarget;
+            if (!trigger) return;
+            document.getElementById('delete-group-form').action =
+                '/admin/idp/groups/' + trigger.dataset.groupId + '/delete';
+            document.getElementById('delete-group-name').textContent = trigger.dataset.groupName;
+        });
+    }
 }

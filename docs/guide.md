@@ -280,7 +280,9 @@ You can create additional local admin accounts via **Admin > Identity Providers*
 
 ## 4. Identity Providers
 
-Identity providers (IDPs) are the LDAP directories that PassPort connects to. Each IDP represents a single Active Directory domain or FreeIPA realm.
+Identity providers (IDPs) are the entries shown to users on the login page and dashboard. Most are LDAP directories that PassPort connects to — each representing a single Active Directory domain or FreeIPA realm — but a **Web Link** is a non-directory provider that simply links out to another site.
+
+The **Admin > Identity Providers** list is sorted by the arrangement you set under **Admin > Provider Groups**, falling back to friendly name for providers you have not arranged. See [Provider Groups](#provider-groups) below.
 
 ### Adding an Active Directory IDP
 
@@ -289,7 +291,7 @@ Navigate to **Admin > Identity Providers > Add New** and select **Active Directo
 | Field | Description | Example |
 |-------|-------------|---------|
 | Friendly Name | Display name shown to users | `Corporate AD` |
-| Description | Optional admin note | `Primary domain controller` |
+| Description | Markdown subtitle shown under the provider name | `Trouble signing in? See the [policy](https://policy.example.com).` |
 | Endpoint | LDAP server hostname and port | `dc01.corp.example.com:636` |
 | Protocol | Connection method | `ldaps`, `starttls`, or `ldap` |
 | Base DN | Root of the directory tree | `DC=corp,DC=example,DC=com` |
@@ -312,6 +314,84 @@ The process is identical except:
 - Passwords are changed using the LDAP Password Modify Extended Operation
 - The service account typically uses `uid=admin,cn=users,cn=accounts,dc=example,dc=com` format
 - User search base defaults to `cn=users,cn=accounts,<base_dn>`
+
+### Adding a Web Link
+
+A **Web Link** publishes an external site alongside your directories. It appears on the login page and dashboard as a normal provider card, but clicking it opens the target URL in a new tab instead of prompting for credentials. Use it to surface a related portal, a VPN self-service page, or an internal help desk without leaving PassPort.
+
+Navigate to **Admin > Identity Providers > Add New** and select **Web Link**. Only the Basic Information fields apply:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| ID | Slug used in URLs and the audit log | `helpdesk` |
+| Friendly Name | Display name shown on the card | `IT Help Desk` |
+| Description | Markdown subtitle shown on the card | `Open a [support ticket](https://helpdesk.example.com).` |
+| Logo | Optional image shown on the card | (uploaded file) |
+| URL | Target site opened in a new tab | `https://helpdesk.example.com` |
+
+Selecting **Web Link** hides the fields that only apply to directories: Connection Settings, Password Settings, Email Notification, Attribute Mappings, Correlation Rule, Password Expiration, and the MFA Provider dropdown.
+
+> **URL restrictions:** Only absolute `http://` and `https://` URLs are accepted. Scheme-relative (`//example.com`), relative (`/path`), and non-web schemes (`javascript:`, `data:`, `file:`, `ftp:`) are rejected and stored as empty. A Web Link with no valid URL is hidden from the login page and dashboard rather than rendering a dead card.
+
+### Markdown Fields
+
+Two fields accept Markdown, and both have a formatting toolbar above them:
+
+| Field | Where it appears | Toolbar |
+|-------|------------------|---------|
+| **Description** | Under the provider name on the login page, dashboard, and forgot-password page | Bold, Italic, Inline code, Link, Bulleted list, Numbered list |
+| **Password Complexity Hint** | On the change-password and reset-password pages | Bold, Italic, **Underline**, Inline code, Link, Bulleted list, Numbered list |
+
+Each toolbar wraps the current selection, or inserts a placeholder if nothing is selected. The **Link** button inserts `[label](https://)` and preselects the URL so you can type straight over it. The list buttons prefix every selected line. The **?** button on the right opens a syntax reference.
+
+Links in a description open in a new tab and are clickable without selecting the provider card — this is the intended way to point users at a password policy page, a help desk article, or a status page.
+
+> **The two fields do not allow the same syntax.** Descriptions appear on the **unauthenticated** login page, so they are rendered through a restricted pipeline: embedded HTML tags are dropped, and link destinations using `javascript:`, `data:`, `vbscript:`, or `file:` are stripped. The complexity hint is only ever shown to a user who has already authenticated, so it permits inline HTML — which is why it gets an Underline button (`<u>text</u>`) and the description does not.
+
+
+### Changing a Provider ID
+
+The **Provider ID (slug)** is fixed once a provider is created — the field is read-only when editing, because the slug is the provider's primary key and is referenced by eleven columns across nine tables, three of which carry no foreign key constraint.
+
+Import/export does **not** rename. Import upserts by ID: if the ID in the file does not already exist it creates a new provider, and it never deletes providers that are absent from the file. Changing the ID in an export and re-importing therefore leaves you with two providers, not a renamed one.
+
+Use the `-rename-idp` flag instead. It runs offline against the database and exits without starting the server:
+
+```sh
+systemctl stop passport
+cp /var/lib/passport/passport.db{,.pre-rename}
+sudo -u passport passport -config /etc/passport/config.yaml -rename-idp old-slug=new-slug
+systemctl start passport
+```
+
+```
+Renamed identity provider "helpdesk" to "support-portal".
+  admin_groups.idp_id                    1
+  sessions.provider_id                   1
+  user_idp_mappings.auth_provider_id     1
+  user_idp_mappings.target_idp_id        1
+  total rows updated                     5
+  logo                                   /uploads/idp-logo-support-portal.png
+Audit log entries still reference the old ID, which preserves the historical record.
+```
+
+> **Stop PassPort first.** Providers are loaded into an in-memory registry at startup, so renaming underneath a running instance leaves it serving the old ID. Back up the database while the service is stopped — copying a live WAL-mode database can produce an inconsistent snapshot.
+
+What the command does:
+
+- Rewrites the slug in `identity_providers` and in every table that references it: attribute mappings, correlation rules, expiration configuration and filters, admin groups, report configuration and filters, user account links (both `target_idp_id` **and** `auth_provider_id`), correlation warnings, and sessions. The whole rename runs in one transaction with deferred foreign key enforcement, then verifies the result with `PRAGMA foreign_key_check`. A failure rolls back and changes nothing.
+- Moves the uploaded logo, whose filename embeds the slug (`uploads/idp-logo-<slug>.<ext>`), and updates `logo_url`. A logo pointing somewhere else — an external URL, for example — is left alone.
+- Validates the new slug the same way the admin form does: lowercase letters, numbers, and hyphens.
+- Refuses to run if the provider does not exist, or if the new slug is already taken.
+
+What it deliberately does **not** do:
+
+- **Rewrite `audit_log`.** Audit rows record what happened under the old ID; rewriting them would falsify the historical record.
+- **Update anything outside the database.** If you reference the slug in external monitoring, bookmarks, or documentation, update those yourself.
+
+The alternative is to delete and recreate the provider, but that cascades: attribute mappings, correlation rules, expiration configuration and filters, admin groups, user account links, and report configuration are all deleted, and users must link their accounts again.
+
+Because a Web Link has no directory behind it, it is excluded from password changes, account linking, correlation, password expiration notifications, reports, admin group membership, and the forgot-password flow. PassPort never sees or handles credentials for the target site — it is only a link.
 
 ### Random Password Policy
 
@@ -387,6 +467,8 @@ Example: If a user logs in via AD where `employeeID=12345`, and FreeIPA has `emp
 
 Use the **Test Connection** button (available on both the create and edit forms) to verify that the service account can bind to the directory before saving.
 
+For a **Web Link**, there is no directory to test, so the button opens the configured URL in a new tab instead. If the URL is missing or not a valid `http(s)` address, the button reports an error rather than opening anything.
+
 ### LDAP Browser
 
 Each enabled IDP has a built-in LDAP directory browser accessible from **Admin > Identity Providers > Browse**. The browser supports:
@@ -401,6 +483,52 @@ This is useful for verifying search bases, finding group DNs for admin groups, a
 
 Use the toggle on the IDP list page to enable or disable a provider without deleting its configuration. Disabled providers are not shown to users and are excluded from correlation.
 
+### Provider Groups
+
+Once you have more than a handful of providers, a flat list stops being useful. **Admin > Provider Groups** lets you sort providers into named sections and control the order they appear in on the login page and the dashboard.
+
+Groups are purely presentational. They do not affect authentication, correlation, MFA, or permissions — a provider behaves identically whether it is grouped or not.
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| Name | Heading shown above the group's providers | `Corporate Directories` |
+| Description | Optional Markdown blurb under the heading | `Use your **workstation** password.` |
+| Icon | Optional [Bootstrap Icons](https://icons.getbootstrap.com/) class name | `bi-building` |
+| Let users collapse this group | Renders the heading as a toggle | (checkbox) |
+| Start collapsed | Loads the group closed. Only available when the group is collapsible | (checkbox) |
+
+**Browse** next to the Icon field opens a searchable picker covering the whole Bootstrap Icons set (~2050 icons). The names are read from the same stylesheet the pages link, so the picker always matches the version in use. Icons load in batches as you scroll, and the search box filters the whole set. Hovering an icon shows its name. Clicking an icon fills the field, and clicking it again clears it; a preview to the left of the field shows the current choice, and the chosen icon is pinned to the front of the grid. The field also still accepts any `bi-` class typed by hand.
+
+Group names must be unique, ignoring case. Import matches groups by name, so a duplicate would be ambiguous when the configuration is moved to another installation.
+
+#### Arranging Providers
+
+The page shows one card per group plus an **Ungrouped** card at the bottom. Drag a provider between cards to move it, drag it within a card to reorder it, and drag a group heading to reorder the groups themselves. The provider follows your pointer into its new position as you drag and the group you are over is highlighted; releasing outside a list, or pressing Escape, cancels the move and leaves the layout as it was.
+
+The built-in **Local Admin** card appears here too, marked *Built-in*, and can be dragged into a group or reordered alongside ungrouped providers just like a real provider.
+
+The arrow buttons on every row do the same thing without a mouse drag, for keyboard and touch use. Moving a provider past the top or bottom of its group carries it into the neighbouring group, so every placement is reachable without dragging.
+
+Nothing is written until you press **Save Arrangement**. The whole layout is saved in one transaction, so a partial arrangement is never persisted. If the page is stale — a provider or group was deleted in another browser tab — the save is rejected in full rather than silently dropping the missing entries; reload the page and try again.
+
+#### How Groups Render
+
+- Groups appear in the order you arranged them, each with its heading, optional icon, and optional description. A group is drawn as a box so it is clear where it ends and the next section begins.
+- Providers you have not assigned to a group appear last, with no heading. There is no "Ungrouped" label on the user-facing pages.
+- **A group with no providers is hidden from users.** The admin page marks it *Empty — hidden from users* so you can tell the difference between a hidden group and a missing one.
+- A collapsible group starts expanded on every page load unless you tick **Start collapsed**, in which case it loads closed. Either way the collapsed/expanded state is not remembered between visits.
+- The **Local Admin** card on the login page appears wherever you arranged it. Until you move it, it renders last, outside every group, as it always did.
+
+#### Deleting a Group
+
+Deleting a group never deletes its identity providers. They move to the ungrouped section and keep appearing for users exactly as before. Only the heading is removed. If Local Admin was in the group, it moves to the ungrouped section too.
+
+Group descriptions are rendered through the same restricted Markdown pipeline as provider descriptions — raw HTML is dropped and dangerous link schemes are stripped — because they appear on the unauthenticated login page. See [Markdown Fields](#markdown-fields).
+
+#### Groups in Backups and Exports
+
+Groups and the arrangement you set travel with `-backup`, `-export`, and the **Admin > Migration** page, including where you placed the Local Admin card. On import, groups are matched by **name**, not by their internal ID: an incoming `Corporate` group updates an existing `Corporate` group instead of creating a duplicate, so importing into an installation that already has groups is safe. Import files created before this feature existed carry no arrangement, and importing one leaves your current grouping untouched. See [Backup & Migration](#20-backup--migration).
+
 ---
 
 ## 5. User Dashboard
@@ -413,11 +541,13 @@ On successful login, the correlation engine runs automatically to link or verify
 
 ### Dashboard Overview
 
-The dashboard shows all enabled IDPs and the user's link status for each:
+The dashboard shows all enabled directory IDPs and the user's link status for each:
 
 - **Linked (auto)** -- automatically correlated via attribute matching
 - **Linked (manual)** -- manually linked by the user
 - **Unlinked** -- no matching account found; manual linking available
+
+Any configured **Web Link** providers are listed separately as link cards, which open the target site in a new tab. They have no link status because there is no directory account to correlate.
 
 ### Changing Passwords
 
@@ -442,7 +572,7 @@ Manual mappings are re-verified on each login. If the target DN is no longer fou
 
 ### Password Complexity Hints
 
-Each IDP can have a password complexity hint displayed when users change their password or complete the forgot-password reset flow. The hint field supports **Markdown**, so you can use formatting to make requirements easier to scan.
+Each IDP can have a password complexity hint displayed when users change their password or complete the forgot-password reset flow. The hint field supports **Markdown**, so you can use formatting to make requirements easier to scan, and has a formatting toolbar above it.
 
 **Supported syntax:**
 
@@ -450,6 +580,8 @@ Each IDP can have a password complexity hint displayed when users change their p
 |--------|--------|
 | `**bold**` | **bold** |
 | `*italic*` | *italic* |
+| `` `code` `` | inline code |
+| `[text](https://…)` | link |
 | `- item` | bullet list |
 | `1. item` | numbered list |
 | `<u>text</u>` | underline (inline HTML) |
@@ -1588,6 +1720,7 @@ Both backup and export include all configuration data:
 |------|----------|
 | Local admin accounts | Yes (password hashes, not plaintext) |
 | Identity providers | Yes (config + credentials) |
+| Provider groups + arrangement | Yes (matched by group name on import) |
 | Attribute mappings | Yes |
 | Correlation rules | Yes |
 | Password expiration config + filters | Yes |

@@ -2,8 +2,10 @@ package ad
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/go-ldap/ldap/v3"
@@ -1009,6 +1011,106 @@ func TestResetPassword_ModifyError(t *testing.T) {
 
 	err := c.ResetPassword(context.Background(), "cn=user,dc=example,dc=com", "new-pass")
 	if err == nil {
+		t.Error("expected error when Modify fails, got nil")
+	}
+}
+
+// TestChangePasswordAsService_UsesChangeSemantics asserts that the must-change
+// fallback keeps the Delete+Add pair. A Replace would still set the password but
+// would silently bypass AD's password history check.
+func TestChangePasswordAsService_UsesChangeSemantics(t *testing.T) {
+	var got *ldap.ModifyRequest
+	mock := &mockLDAPConn{
+		bindFunc: func(username, _ string) error {
+			if username != "cn=admin,dc=example,dc=com" {
+				return fmt.Errorf("LDAP Result Code 49 \"Invalid Credentials\": data 773")
+			}
+			return nil
+		},
+		modifyFunc: func(req *ldap.ModifyRequest) error {
+			got = req
+			return nil
+		},
+	}
+	c := newTestConnector(mock)
+
+	if err := c.ChangePassword(context.Background(), "cn=user,dc=example,dc=com", "old", "new"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected a Modify request")
+	}
+	if len(got.Changes) != 2 {
+		t.Fatalf("expected 2 changes (delete+add), got %d", len(got.Changes))
+	}
+	if got.Changes[0].Operation != ldap.DeleteAttribute {
+		t.Errorf("expected first change to be a Delete, got operation %d", got.Changes[0].Operation)
+	}
+	if got.Changes[1].Operation != ldap.AddAttribute {
+		t.Errorf("expected second change to be an Add, got operation %d", got.Changes[1].Operation)
+	}
+}
+
+// TestChangePasswordAsService_PolicyViolation covers the policy branch of the
+// must-change fallback, including that the raw AD text is preserved.
+func TestChangePasswordAsService_PolicyViolation(t *testing.T) {
+	mock := &mockLDAPConn{
+		bindFunc: func(username, _ string) error {
+			if username != "cn=admin,dc=example,dc=com" {
+				return fmt.Errorf("LDAP Result Code 49 \"Invalid Credentials\": data 773")
+			}
+			return nil
+		},
+		modifyFunc: func(_ *ldap.ModifyRequest) error {
+			return fmt.Errorf("LDAP Result Code 53: 0000052D: SvcErr: DSID-031A121C")
+		},
+	}
+	c := newTestConnector(mock)
+
+	err := c.ChangePassword(context.Background(), "cn=user,dc=example,dc=com", "old", "new")
+	if !errors.Is(err, idp.ErrPasswordPolicy) {
+		t.Fatalf("expected ErrPasswordPolicy, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "0000052D") {
+		t.Errorf("expected raw AD diagnostic to be preserved, got: %v", err)
+	}
+}
+
+// TestClearPasswordAge_Success verifies pwdLastSet is zeroed, which is what exempts
+// the account from the domain minimum password age.
+func TestClearPasswordAge_Success(t *testing.T) {
+	var got *ldap.ModifyRequest
+	mock := &mockLDAPConn{
+		bindFunc: func(_, _ string) error { return nil },
+		modifyFunc: func(req *ldap.ModifyRequest) error {
+			got = req
+			return nil
+		},
+	}
+	c := newTestConnector(mock)
+
+	if err := c.ClearPasswordAge(context.Background(), "cn=user,dc=example,dc=com"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if got == nil || len(got.Changes) != 1 {
+		t.Fatal("expected a single-attribute Modify request")
+	}
+	if attr := got.Changes[0].Modification; attr.Type != "pwdLastSet" || attr.Vals[0] != "0" {
+		t.Errorf("expected pwdLastSet=0, got %s=%v", attr.Type, attr.Vals)
+	}
+}
+
+// TestClearPasswordAge_ModifyError covers the Modify error branch.
+func TestClearPasswordAge_ModifyError(t *testing.T) {
+	mock := &mockLDAPConn{
+		bindFunc: func(_, _ string) error { return nil },
+		modifyFunc: func(_ *ldap.ModifyRequest) error {
+			return fmt.Errorf("insufficient access rights")
+		},
+	}
+	c := newTestConnector(mock)
+
+	if err := c.ClearPasswordAge(context.Background(), "cn=user,dc=example,dc=com"); err == nil {
 		t.Error("expected error when Modify fails, got nil")
 	}
 }

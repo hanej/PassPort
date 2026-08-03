@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -57,6 +58,22 @@ func NewLoginHandler(
 	}
 }
 
+// LoginIDPCard is the view model for a provider card on the login page.
+// WebLinkURL is set only for weblink providers, whose cards link out instead
+// of opening the sign-in form. IsLocal marks the built-in Local Admin card.
+type LoginIDPCard struct {
+	db.IdentityProviderRecord
+	WebLinkURL string
+	IsLocal    bool
+}
+
+// LoginIDPSection is one group of provider cards. Group is nil for ungrouped
+// providers, which render without a heading after all the groups.
+type LoginIDPSection struct {
+	Group *db.IDPGroup
+	IDPs  []LoginIDPCard
+}
+
 // ShowLogin renders the login page with the list of enabled identity providers.
 // GET /login
 func (h *LoginHandler) ShowLogin(w http.ResponseWriter, r *http.Request) {
@@ -67,9 +84,54 @@ func (h *LoginHandler) ShowLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A group failure must not take down the login page, so fall back to
+	// rendering every provider ungrouped.
+	groups, err := h.store.ListIDPGroups(r.Context())
+	if err != nil {
+		h.logger.Warn("failed to list provider groups, rendering ungrouped", "error", err)
+		groups = nil
+	}
+
+	// Likewise, Local Admin must always be offered even if its placement is
+	// unreadable; it then falls back to the ungrouped section.
+	placement, err := h.store.GetLocalAdminPlacement(r.Context())
+	if err != nil {
+		h.logger.Warn("failed to load local admin placement, rendering ungrouped", "error", err)
+		placement = db.LocalAdminPlacement{}
+	}
+
 	h.logger.Debug("ShowLogin called",
 		"idp_count", len(idps),
 	)
+
+	sections := make([]LoginIDPSection, 0, len(groups)+1)
+	for _, sec := range sectionIDPs(groups, withLocalAdmin(idps, placement)) {
+		cards := make([]LoginIDPCard, 0, len(sec.IDPs))
+		for _, rec := range sec.IDPs {
+			card := LoginIDPCard{IdentityProviderRecord: rec}
+			if rec.ID == db.LocalAdminIDPID {
+				card.IsLocal = true
+				cards = append(cards, card)
+				continue
+			}
+			if !idp.ProviderType(rec.ProviderType).IsDirectory() {
+				var cfg idp.Config
+				if err := json.Unmarshal([]byte(rec.ConfigJSON), &cfg); err == nil {
+					card.WebLinkURL = idp.NormalizeWebLinkURL(cfg.URL)
+				}
+				// A weblink with no usable URL would render a dead card.
+				if card.WebLinkURL == "" {
+					continue
+				}
+			}
+			cards = append(cards, card)
+		}
+		// Dropping unusable weblinks can empty a section.
+		if len(cards) == 0 {
+			continue
+		}
+		sections = append(sections, LoginIDPSection{Group: sec.Group, IDPs: cards})
+	}
 
 	flash := h.sessions.GetFlash(r)
 
@@ -77,7 +139,7 @@ func (h *LoginHandler) ShowLogin(w http.ResponseWriter, r *http.Request) {
 		Title: "Login",
 		Flash: flash,
 		Data: map[string]any{
-			"IDPs": idps,
+			"Sections": sections,
 		},
 	})
 }
@@ -326,6 +388,9 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 			}
 			runCorrelation = false
 			for _, rec := range enabledIDPs {
+				if !idp.ProviderType(rec.ProviderType).IsDirectory() {
+					continue
+				}
 				if _, ok := linked[rec.ID]; !ok {
 					runCorrelation = true
 					break

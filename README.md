@@ -94,6 +94,14 @@ passport -config config.yaml -import passport-backup.json
 
 See the [Backup & Migration guide](docs/guide.md#18-backup--migration) for full details.
 
+### Renaming an Identity Provider
+
+A provider's slug is its primary key and cannot be changed from the admin UI. Stop the service, back up the database, then rename it offline — every reference, including the uploaded logo, is rewritten in one transaction:
+
+```bash
+passport -config config.yaml -rename-idp old-slug=new-slug
+```
+
 ## Configuration
 
 PassPort uses a minimal `config.yaml` for startup settings only. All runtime configuration (IDPs, SMTP, MFA, branding, templates, etc.) is managed through the Admin UI and stored in the database.

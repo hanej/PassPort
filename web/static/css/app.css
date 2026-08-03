@@ -13,6 +13,7 @@
     --pp-gray-800: #2d3748;
     --pp-ad-color: #0078d4;
     --pp-freeipa-color: #ff0000;
+    --pp-weblink-color: #6f42c1;
     --pp-local-color: #6b7280;
     --pp-online: #38a169;
     --pp-offline: #e53e3e;
@@ -66,6 +67,18 @@ main {
     border-left-color: var(--pp-local-color);
 }
 
+.idp-card-weblink {
+    border-left-color: var(--pp-weblink-color);
+}
+
+.weblink-card {
+    cursor: pointer;
+}
+
+.weblink-card:hover {
+    transform: translateY(-1px);
+}
+
 .provider-select-card {
     cursor: pointer;
 }
@@ -87,6 +100,142 @@ main {
 .badge-freeipa {
     background-color: var(--pp-freeipa-color);
     color: #fff;
+}
+
+.badge-weblink {
+    background-color: var(--pp-weblink-color);
+    color: #fff;
+}
+
+/* ---- Provider Group Arrangement ---- */
+
+.group-card .group-handle,
+.idp-chip {
+    cursor: grab;
+}
+
+/* Safari has no UA rules for [draggable=true], so a press starts a text
+   selection instead of a drag unless these are set explicitly. */
+.idp-chip,
+.group-card {
+    -webkit-user-drag: element;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* The element being dragged is dimmed in place. It must stay rendered:
+   `display: none` or `visibility: hidden` makes Chromium cancel the drag. */
+.group-card.drag-ghost,
+.idp-chip.drag-ghost {
+    opacity: 0.4;
+}
+
+.idp-dropzone {
+    min-height: 3rem;
+}
+
+.idp-dropzone.dropzone-active {
+    background-color: rgba(var(--bs-primary-rgb), 0.06);
+    outline: 2px dashed rgba(var(--bs-primary-rgb), 0.4);
+    outline-offset: -4px;
+}
+
+.group-card-ungrouped {
+    border-style: dashed;
+}
+
+/* ---- Provider Group Headings ---- */
+
+/* A group is boxed so it is obvious where it ends. Without this, ungrouped
+   providers and the built-in Local Admin card read as members of the last
+   group, since they carry identical spacing. */
+.idp-group-titled {
+    padding: 0.75rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.5rem;
+    background-color: rgba(var(--bs-emphasis-color-rgb, 0, 0, 0), 0.02);
+}
+
+/* An ungrouped section following a boxed group needs extra air, or its cards
+   read as a continuation of that group. */
+.idp-group-titled + .idp-group:not(.idp-group-titled) {
+    margin-top: 1.25rem;
+}
+
+.idp-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.idp-group-heading::after {
+    content: "";
+    flex: 1 1 auto;
+    border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+
+a.idp-group-heading {
+    text-decoration: none;
+}
+
+a.idp-group-heading:hover {
+    color: var(--pp-primary-color, #2c5282);
+}
+
+.idp-group-heading .idp-group-caret {
+    transition: transform 0.15s ease-in-out;
+}
+
+.idp-group-heading.collapsed .idp-group-caret {
+    transform: rotate(-90deg);
+}
+
+/* ---- Icon Picker ---- */
+
+.icon-picker-preview i {
+    font-size: 1.1rem;
+}
+
+.icon-picker {
+    padding: 0.5rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+}
+
+.icon-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(2.5rem, 1fr));
+    gap: 0.25rem;
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+.icon-picker-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    font-size: 1.1rem;
+    color: var(--bs-body-color, #212529);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+    cursor: pointer;
+}
+
+.icon-picker-item:hover {
+    background-color: rgba(var(--bs-primary-rgb), 0.08);
+}
+
+.icon-picker-item.selected {
+    color: var(--bs-primary, #0d6efd);
+    border-color: var(--bs-primary, #0d6efd);
+    background-color: rgba(var(--bs-primary-rgb), 0.12);
 }
 
 /* ---- Status Indicators ---- */
@@ -157,6 +306,21 @@ main {
 
 .password-match-indicator.no-match::before {
     content: '\2717 ';
+}
+
+/* ---- Password Rules Checklist ---- */
+
+.password-rule {
+    color: var(--bs-secondary-color, #6c757d);
+    transition: color 0.15s ease-in-out;
+}
+
+.password-rule.rule-met {
+    color: var(--pp-online);
+}
+
+.password-rule.rule-unmet {
+    color: var(--pp-offline);
 }
 
 /* ---- Admin Sidebar ---- */
@@ -330,4 +494,42 @@ main {
     font-size: 0.85rem;
     line-height: 1;
     vertical-align: middle;
+}
+
+/* ---- Markdown Editor (toolbar + textarea) ---- */
+
+.markdown-toolbar {
+    border: 1px solid var(--bs-border-color);
+    border-bottom: 0;
+    border-radius: var(--bs-border-radius) var(--bs-border-radius) 0 0;
+    background-color: var(--bs-tertiary-bg);
+    padding: 0.25rem 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.25rem 0;
+}
+
+.markdown-editor textarea {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    font-family: var(--bs-font-monospace);
+    font-size: 0.875rem;
+}
+
+/* ---- IDP Description (Markdown-rendered) ---- */
+
+.idp-description > :last-child {
+    margin-bottom: 0;
+}
+
+.idp-description ul,
+.idp-description ol {
+    padding-left: 1.25rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Lift description links above the card's stretched-link overlay so they
+   remain clickable inside a Web Link card. */
+.idp-description a {
+    position: relative;
+    z-index: 2;
 }

@@ -26,6 +26,20 @@ type IDPPanel struct {
 	Warning        string // correlation warning message (e.g. ambiguous match)
 }
 
+// IDPLink holds the data needed to render a weblink provider on the dashboard.
+type IDPLink struct {
+	IDP db.IdentityProviderRecord
+	URL string
+}
+
+// DashboardSection is one group of providers on the dashboard. Group is nil for
+// ungrouped providers, which render without a heading after all the groups.
+type DashboardSection struct {
+	Group  *db.IDPGroup
+	Panels []IDPPanel
+	Links  []IDPLink
+}
+
 // DashboardHandler serves the user dashboard.
 type DashboardHandler struct {
 	store      db.Store
@@ -83,6 +97,14 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 		"count", len(idps),
 	)
 
+	// A group failure must not take down the dashboard, so fall back to
+	// rendering every provider ungrouped.
+	groups, err := h.store.ListIDPGroups(r.Context())
+	if err != nil {
+		h.logger.Warn("failed to list provider groups, rendering ungrouped", "error", err)
+		groups = nil
+	}
+
 	// Load the user's mappings from all IDPs.
 	// Use empty authProviderID to retrieve mappings regardless of which provider
 	// originally created them — consistent with how correlation determines linkage.
@@ -115,60 +137,87 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Build IDP panels.
-	panels := make([]IDPPanel, 0, len(idps))
-	for _, rec := range idps {
-		panel := IDPPanel{
-			IDP:     rec,
-			Mapping: mappingByIDP[rec.ID],
-			Warning: warningByIDP[rec.ID],
-		}
-
-		// Parse config JSON for password hints.
-		if rec.ConfigJSON != "" {
-			var cfg idp.Config
-			if err := json.Unmarshal([]byte(rec.ConfigJSON), &cfg); err != nil {
-				h.logger.Warn("failed to parse IDP config JSON",
-					"idp_id", rec.ID,
-					"error", err,
-				)
-			} else {
-				panel.Config = &cfg
+	sections := make([]DashboardSection, 0, len(idps))
+	allPanels := make([]IDPPanel, 0, len(idps))
+	for _, sec := range sectionIDPs(groups, idps) {
+		panels := make([]IDPPanel, 0, len(sec.IDPs))
+		links := make([]IDPLink, 0)
+		for _, rec := range sec.IDPs {
+			// Weblink providers are not password-managed; render them as links.
+			if !idp.ProviderType(rec.ProviderType).IsDirectory() {
+				var cfg idp.Config
+				if err := json.Unmarshal([]byte(rec.ConfigJSON), &cfg); err != nil {
+					h.logger.Warn("failed to parse IDP config JSON", "idp_id", rec.ID, "error", err)
+					continue
+				}
+				url := idp.NormalizeWebLinkURL(cfg.URL)
+				if url == "" {
+					continue
+				}
+				links = append(links, IDPLink{IDP: rec, URL: url})
+				continue
 			}
-		}
 
-		// Populate username and best-effort display_name for linked accounts.
-		if panel.Mapping != nil && panel.Mapping.TargetAccountDN != "" {
-			panel.TargetUsername = panel.Mapping.AuthUsername
+			panel := IDPPanel{
+				IDP:     rec,
+				Mapping: mappingByIDP[rec.ID],
+				Warning: warningByIDP[rec.ID],
+			}
 
-			if provider, ok := h.registry.Get(rec.ID); ok {
-				attrMappings, mapErr := h.store.ListAttributeMappings(r.Context(), rec.ID)
-				if mapErr == nil {
-					for _, m := range attrMappings {
-						switch m.CanonicalName {
-						case "display_name":
-							if val, attrErr := provider.GetUserAttribute(r.Context(), panel.Mapping.TargetAccountDN, m.DirectoryAttr); attrErr == nil {
-								panel.DisplayName = val
-							}
-						case "email":
-							if val, attrErr := provider.GetUserAttribute(r.Context(), panel.Mapping.TargetAccountDN, m.DirectoryAttr); attrErr == nil {
-								panel.Email = val
+			// Parse config JSON for password hints.
+			if rec.ConfigJSON != "" {
+				var cfg idp.Config
+				if err := json.Unmarshal([]byte(rec.ConfigJSON), &cfg); err != nil {
+					h.logger.Warn("failed to parse IDP config JSON",
+						"idp_id", rec.ID,
+						"error", err,
+					)
+				} else {
+					panel.Config = &cfg
+				}
+			}
+
+			// Populate username and best-effort display_name for linked accounts.
+			if panel.Mapping != nil && panel.Mapping.TargetAccountDN != "" {
+				panel.TargetUsername = panel.Mapping.AuthUsername
+
+				if provider, ok := h.registry.Get(rec.ID); ok {
+					attrMappings, mapErr := h.store.ListAttributeMappings(r.Context(), rec.ID)
+					if mapErr == nil {
+						for _, m := range attrMappings {
+							switch m.CanonicalName {
+							case "display_name":
+								if val, attrErr := provider.GetUserAttribute(r.Context(), panel.Mapping.TargetAccountDN, m.DirectoryAttr); attrErr == nil {
+									panel.DisplayName = val
+								}
+							case "email":
+								if val, attrErr := provider.GetUserAttribute(r.Context(), panel.Mapping.TargetAccountDN, m.DirectoryAttr); attrErr == nil {
+									panel.Email = val
+								}
 							}
 						}
 					}
 				}
 			}
+
+			panels = append(panels, panel)
 		}
 
-		panels = append(panels, panel)
+		// Dropping unusable weblinks can empty a section.
+		if len(panels) == 0 && len(links) == 0 {
+			continue
+		}
+		sections = append(sections, DashboardSection{Group: sec.Group, Panels: panels, Links: links})
+		allPanels = append(allPanels, panels...)
 	}
 
 	h.logger.Debug("built dashboard panels",
-		"panel_count", len(panels),
+		"panel_count", len(allPanels),
 	)
 
 	// Check if any panels are unlinked (for auto-refresh script).
 	hasUnlinked := false
-	for _, p := range panels {
+	for _, p := range allPanels {
 		if p.Mapping == nil {
 			hasUnlinked = true
 			break
@@ -182,7 +231,7 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 		Session: sess,
 		Flash:   flash,
 		Data: map[string]any{
-			"Panels":      panels,
+			"Sections":    sections,
 			"ProviderID":  sess.ProviderID,
 			"HasUnlinked": hasUnlinked,
 		},

@@ -83,7 +83,7 @@ func (h *AdminReportsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var items []idpReportEntry
-	for _, idpRec := range idps {
+	for _, idpRec := range directoryIDPs(idps) {
 		configs, _ := h.store.ListReportConfigsForIDP(r.Context(), idpRec.ID)
 		entry := idpReportEntry{IDP: idpRec}
 		for i := range configs {

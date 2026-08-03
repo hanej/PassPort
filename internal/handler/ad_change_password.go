@@ -58,17 +58,40 @@ func (h *ADChangePasswordHandler) loadComplexityHint(r *http.Request, providerID
 	return cfg.PasswordComplexityHint
 }
 
+// pageData builds the render data for the change form, including the directory's
+// password rules when they can be read. The directory stays the authority, so a
+// failure here just omits the client-side rules.
+func (h *ADChangePasswordHandler) pageData(r *http.Request, sess *db.Session) map[string]any {
+	data := map[string]any{"ComplexityHint": ""}
+	if sess == nil {
+		return data
+	}
+	data["ComplexityHint"] = h.loadComplexityHint(r, sess.ProviderID)
+
+	provider, ok := h.registry.Get(sess.ProviderID)
+	if !ok {
+		return data
+	}
+	reader, ok := provider.(idp.PasswordPolicyReader)
+	if !ok {
+		return data
+	}
+	if dirPolicy, err := reader.ResolvePasswordPolicy(r.Context(), sess.Username); err == nil {
+		data["PasswordPolicy"] = dirPolicy
+	} else {
+		h.logger.Warn("could not read password policy for display",
+			"username", sess.Username, "error", err)
+	}
+	return data
+}
+
 // ShowChangePassword renders the AD change password form.
 func (h *ADChangePasswordHandler) ShowChangePassword(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
-	hint := ""
-	if sess != nil {
-		hint = h.loadComplexityHint(r, sess.ProviderID)
-	}
 	h.renderer.Render(w, r, "ad_force_password_change.html", PageData{
 		Title:   "Change Password",
 		Session: sess,
-		Data:    map[string]any{"ComplexityHint": hint},
+		Data:    h.pageData(r, sess),
 	})
 }
 
@@ -87,7 +110,7 @@ func (h *ADChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.
 			Title:   "Change Password",
 			Session: sess,
 			Flash:   map[string]string{"category": "error", "message": msg},
-			Data:    map[string]any{"ComplexityHint": hint},
+			Data:    h.pageData(r, sess),
 		})
 	}
 
@@ -117,7 +140,7 @@ func (h *ADChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.
 		var msg string
 		switch {
 		case errors.Is(err, idp.ErrPasswordPolicy):
-			msg = "The new password does not meet your organization's requirements."
+			msg = "The new password does not meet your organization's complexity, history, or minimum age requirements."
 			if hint != "" {
 				msg += " " + hint
 			}

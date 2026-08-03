@@ -31,11 +31,13 @@
                 <td>
                     {{if eq .ProviderType "ad"}}
                     <span class="badge badge-ad">Active Directory</span>
+                    {{else if eq .ProviderType "weblink"}}
+                    <span class="badge badge-weblink">Web Link</span>
                     {{else}}
                     <span class="badge badge-freeipa">FreeIPA</span>
                     {{end}}
                 </td>
-                <td class="text-muted small">{{.Endpoint}}</td>
+                <td class="text-muted small">{{if eq .ProviderType "weblink"}}{{.URL}}{{else}}{{.Endpoint}}{{end}}</td>
                 <td>
                     {{if .Enabled}}
                     <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Enabled</span>
@@ -49,6 +51,13 @@
                            data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Edit">
                             <i class="bi bi-pencil"></i>
                         </a>
+                        {{if eq .ProviderType "weblink"}}
+                        <a href="{{.URL}}" target="_blank" rel="noopener noreferrer"
+                           class="btn btn-sm btn-outline-info idp-action-btn"
+                           data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Open Link">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                        {{else}}
                         <a href="/admin/idp/{{.ID}}/browse-page" class="btn btn-sm btn-outline-secondary idp-action-btn"
                            data-bs-toggle="tooltip" data-bs-delay='{"show":200,"hide":0}' title="Browse Directory">
                             <i class="bi bi-diagram-3"></i>
@@ -60,6 +69,7 @@
                                 <i class="bi bi-plug"></i>
                             </button>
                         </form>
+                        {{end}}
                         <form method="POST" action="/admin/idp/{{.ID}}/toggle" class="d-inline">
                             {{$.CSRFField}}
                             <button type="submit" class="btn btn-sm btn-outline-{{if .Enabled}}warning{{else}}success{{end}} idp-action-btn"
