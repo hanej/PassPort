@@ -307,6 +307,18 @@ func TestResolvePasswordPolicy(t *testing.T) {
 			if got.DisplayName != tc.wantDisplay {
 				t.Errorf("expected display name %q, got %q", tc.wantDisplay, got.DisplayName)
 			}
+			// AD's complexity rule is fixed at three categories plus the name check,
+			// so the two must move together with ComplexityEnabled.
+			wantCategories := 0
+			if tc.wantComplexity {
+				wantCategories = 3
+			}
+			if got.MinCategories != wantCategories {
+				t.Errorf("expected %d categories, got %d", wantCategories, got.MinCategories)
+			}
+			if got.ForbidsUserName != tc.wantComplexity {
+				t.Errorf("expected ForbidsUserName %v, got %v", tc.wantComplexity, got.ForbidsUserName)
+			}
 		})
 	}
 }
@@ -353,4 +365,211 @@ func TestResolvePasswordPolicy_Errors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// emptyResult is a well-formed search response with no entries, which is what a
+// directory returns for a base DN the service account cannot read.
+func emptyResult() *ldap.SearchResult { return &ldap.SearchResult{Entries: []*ldap.Entry{}} }
+
+// TestPasswordAge_DirectoryReadFailures covers the error paths the policy
+// lookups take when the directory refuses or withholds a read. These matter:
+// every one of them must surface as an error rather than a silent "no policy",
+// which would drop the minimum-age gate for the users it exists to restrict.
+func TestPasswordAge_DirectoryReadFailures(t *testing.T) {
+	searchErr := fmt.Errorf("ldap: insufficient access rights")
+
+	t.Run("RootDSE read fails", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				if req.BaseDN == "" {
+					return nil, searchErr
+				}
+				return entry(testUserDN, map[string]string{"pwdLastSet": timeToFiletime(time.Now())}), nil
+			},
+		})
+		if _, err := c.PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the RootDSE cannot be read")
+		}
+	})
+
+	t.Run("RootDSE returns no entry", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				if req.BaseDN == "" {
+					return emptyResult(), nil
+				}
+				return entry(testUserDN, map[string]string{"pwdLastSet": timeToFiletime(time.Now())}), nil
+			},
+		})
+		if _, err := c.PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the RootDSE returns nothing")
+		}
+	})
+
+	t.Run("RootDSE has no defaultNamingContext", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				if req.BaseDN == "" {
+					return entry("", map[string]string{}), nil
+				}
+				return entry(testUserDN, map[string]string{"pwdLastSet": timeToFiletime(time.Now())}), nil
+			},
+		})
+		if _, err := c.PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when defaultNamingContext is empty")
+		}
+	})
+
+	t.Run("domain head read fails", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				switch req.BaseDN {
+				case "":
+					return entry("", map[string]string{"defaultNamingContext": testDomainDN}), nil
+				case testDomainDN:
+					return nil, searchErr
+				}
+				return entry(testUserDN, map[string]string{"pwdLastSet": timeToFiletime(time.Now())}), nil
+			},
+		})
+		if _, err := c.PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the domain head cannot be read")
+		}
+	})
+
+	t.Run("domain head returns no entry", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				switch req.BaseDN {
+				case "":
+					return entry("", map[string]string{"defaultNamingContext": testDomainDN}), nil
+				case testDomainDN:
+					return emptyResult(), nil
+				}
+				return entry(testUserDN, map[string]string{"pwdLastSet": timeToFiletime(time.Now())}), nil
+			},
+		})
+		if _, err := c.PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the domain head returns nothing")
+		}
+	})
+
+	t.Run("minPwdAge is not a number", func(t *testing.T) {
+		m := &ageMock{
+			user:   map[string]string{"pwdLastSet": timeToFiletime(time.Now())},
+			domain: map[string]string{"minPwdAge": "not-a-number"},
+		}
+		if _, err := newTestConnector(m.conn()).PasswordChangeAllowedAt(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error parsing a non-numeric minPwdAge")
+		}
+	})
+}
+
+// TestPasswordChangeAllowedAt_ResolveUserDNFails covers the lookup that turns a
+// bare account name into a DN.
+func TestPasswordChangeAllowedAt_ResolveUserDNFails(t *testing.T) {
+	c := newTestConnector(&mockLDAPConn{
+		bindFunc:   func(_, _ string) error { return nil },
+		searchFunc: func(_ *ldap.SearchRequest) (*ldap.SearchResult, error) { return emptyResult(), nil },
+	})
+	if _, err := c.PasswordChangeAllowedAt(context.Background(), "jdoe"); err == nil {
+		t.Error("expected an error when the account name cannot be resolved to a DN")
+	}
+}
+
+// TestResolvePasswordPolicy_Failures covers the guidance lookup's error paths.
+func TestResolvePasswordPolicy_Failures(t *testing.T) {
+	t.Run("user cannot be resolved", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc:   func(_, _ string) error { return nil },
+			searchFunc: func(_ *ldap.SearchRequest) (*ldap.SearchResult, error) { return emptyResult(), nil },
+		})
+		if _, err := c.ResolvePasswordPolicy(context.Background(), "jdoe"); err == nil {
+			t.Error("expected an error when the account name cannot be resolved")
+		}
+	})
+
+	t.Run("service bind fails", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return fmt.Errorf("ldap: invalid credentials") },
+		})
+		if _, err := c.ResolvePasswordPolicy(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the service account cannot bind")
+		}
+	})
+
+	t.Run("user object read fails", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(_ *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				return nil, fmt.Errorf("ldap: server down")
+			},
+		})
+		if _, err := c.ResolvePasswordPolicy(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the user object cannot be read")
+		}
+	})
+
+	t.Run("user object not found", func(t *testing.T) {
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc:   func(_, _ string) error { return nil },
+			searchFunc: func(_ *ldap.SearchRequest) (*ldap.SearchResult, error) { return emptyResult(), nil },
+		})
+		if _, err := c.ResolvePasswordPolicy(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the user object is missing")
+		}
+	})
+
+	t.Run("minimum length unreadable", func(t *testing.T) {
+		m := &ageMock{
+			user:   map[string]string{"sAMAccountName": "jdoe"},
+			domain: map[string]string{}, // minPwdLength withheld
+		}
+		if _, err := newTestConnector(m.conn()).ResolvePasswordPolicy(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when no minimum length is available")
+		}
+	})
+
+	t.Run("complexity lookup fails", func(t *testing.T) {
+		calls := 0
+		c := newTestConnector(&mockLDAPConn{
+			bindFunc: func(_, _ string) error { return nil },
+			searchFunc: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+				switch req.BaseDN {
+				case testUserDN:
+					return entry(testUserDN, map[string]string{"sAMAccountName": "jdoe"}), nil
+				case "":
+					// Fail the second RootDSE read, i.e. the complexity lookup.
+					calls++
+					if calls > 1 {
+						return nil, fmt.Errorf("ldap: server down")
+					}
+					return entry("", map[string]string{"defaultNamingContext": testDomainDN}), nil
+				}
+				return entry(testDomainDN, map[string]string{"minPwdLength": "8"}), nil
+			},
+		})
+		if _, err := c.ResolvePasswordPolicy(context.Background(), testUserDN); err == nil {
+			t.Error("expected an error when the complexity lookup fails")
+		}
+	})
+
+	t.Run("pwdProperties withheld means complexity off", func(t *testing.T) {
+		m := &ageMock{
+			user:   map[string]string{"sAMAccountName": "jdoe"},
+			domain: map[string]string{"minPwdLength": "8"},
+		}
+		policy, err := newTestConnector(m.conn()).ResolvePasswordPolicy(context.Background(), testUserDN)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if policy.ComplexityEnabled {
+			t.Error("an absent pwdProperties must not be reported as complexity enabled")
+		}
+	})
 }

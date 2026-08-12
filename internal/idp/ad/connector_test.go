@@ -1204,3 +1204,74 @@ func TestSearchUser_EmptySearchBase(t *testing.T) {
 		t.Errorf("expected DN, got %s", dn)
 	}
 }
+
+// TestMapLdapBindError checks every AD sub-code that must surface as a sentinel
+// error. Getting one wrong sends the user a generic "invalid credentials" page
+// instead of the forced-change or account-locked flow they actually need.
+func TestMapLdapBindError(t *testing.T) {
+	code49 := func(data string) error {
+		return fmt.Errorf("LDAP Result Code 49 \"Invalid Credentials\": 80090308: LdapErr: DSID-0C09042A, comment: AcceptSecurityContext error, data %s, v4563", data)
+	}
+
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"nil error", nil, nil},
+		{"must change password", code49("773"), idp.ErrPasswordMustChange},
+		{"password expired", code49("532"), idp.ErrPasswordExpired},
+		{"account locked", code49("775"), idp.ErrAccountLocked},
+		{"account disabled", code49("533"), idp.ErrAccountDisabled},
+		{"account expired", code49("701"), idp.ErrAccountExpired},
+		{"plain bad password is not a sentinel", code49("52e"), nil},
+		{"unknown sub-code", code49("999"), nil},
+		{"unrelated error", errors.New("connection refused"), nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapLdapBindError(tt.err); !errors.Is(got, tt.want) {
+				t.Errorf("mapLdapBindError = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsLdapInvalidCredentials(t *testing.T) {
+	bad := errors.New(`LDAP Result Code 49 "Invalid Credentials": data 52e, v4563`)
+	if !isLdapInvalidCredentials(bad) {
+		t.Error("expected data 52e to be recognised as invalid credentials")
+	}
+	if isLdapInvalidCredentials(errors.New("LDAP Result Code 49: data 773")) {
+		t.Error("must-change is not a plain bad password")
+	}
+	if isLdapInvalidCredentials(nil) {
+		t.Error("nil error must not be invalid credentials")
+	}
+	// Result code 53 (unwilling to perform) shares no sub-code vocabulary.
+	if isLdapInvalidCredentials(errors.New("LDAP Result Code 53: data 52e")) {
+		t.Error("only result code 49 counts")
+	}
+}
+
+// TestIsLdapPasswordPolicyViolation covers the Modify-side sub-code AD returns
+// when a new password fails complexity, history, or minimum-age rules.
+func TestIsLdapPasswordPolicyViolation(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"policy restriction", errors.New("LDAP Result Code 19: 0000052D: AtrErr: DSID-03191083"), true},
+		{"other constraint violation", errors.New("LDAP Result Code 19: 0000209A: SvcErr"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLdapPasswordPolicyViolation(tt.err); got != tt.want {
+				t.Errorf("isLdapPasswordPolicyViolation = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -20,10 +20,11 @@ type IDPPanel struct {
 	IDP            db.IdentityProviderRecord
 	Mapping        *db.UserIDPMapping
 	Config         *idp.Config
-	DisplayName    string // display_name fetched from target directory (best-effort)
-	TargetUsername string // username from the account mapping
-	Email          string // email fetched from target directory (best-effort)
-	Warning        string // correlation warning message (e.g. ambiguous match)
+	DisplayName    string              // display_name fetched from target directory (best-effort)
+	TargetUsername string              // username from the account mapping
+	Email          string              // email fetched from target directory (best-effort)
+	Warning        string              // correlation warning message (e.g. ambiguous match)
+	PasswordPolicy *idp.PasswordPolicy // directory rules for the change form; nil when unknown
 }
 
 // IDPLink holds the data needed to render a weblink provider on the dashboard.
@@ -195,6 +196,18 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 									panel.Email = val
 								}
 							}
+						}
+					}
+
+					// Best effort: the directory stays the authority, so an unreadable
+					// policy just leaves the form without client-side rules.
+					showPolicy := panel.Config == nil || !panel.Config.HideDiscoveredPasswordPolicy
+					if reader, isReader := provider.(idp.PasswordPolicyReader); isReader && showPolicy {
+						if dirPolicy, polErr := reader.ResolvePasswordPolicy(r.Context(), panel.Mapping.TargetAccountDN); polErr == nil {
+							panel.PasswordPolicy = &dirPolicy
+						} else {
+							h.logger.Debug("could not read password policy for dashboard form",
+								"idp_id", rec.ID, "error", polErr)
 						}
 					}
 				}

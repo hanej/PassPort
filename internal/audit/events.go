@@ -39,4 +39,61 @@ const (
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
+	// ResultWarning records an action that completed but with a caveat worth
+	// keeping, such as a policy check that could not be performed.
+	ResultWarning = "warning"
 )
+
+// FilterOption is one entry in the audit viewer's action filter.
+type FilterOption struct {
+	Group string
+	Value string
+	Label string
+}
+
+// FilterOptions lists every action the log can record, so the viewer's filter
+// cannot drift from the constants above. Filtering matches the action exactly.
+func FilterOptions() []FilterOption {
+	return []FilterOption{
+		{"Authentication", ActionLogin, "Login"},
+		{"Authentication", ActionLogout, "Logout"},
+		{"Authentication", ActionMFAVerify, "MFA Verification"},
+
+		{"Passwords", ActionPasswordChange, "Password Change"},
+		{"Passwords", ActionPasswordReset, "Password Reset"},
+		{"Passwords", ActionAdminPasswordChange, "Local Admin Password Change"},
+
+		{"Accounts", ActionAccountUnlock, "Account Unlock"},
+		{"Accounts", ActionAccountEnable, "Account Enable"},
+
+		{"Account Linking", ActionLinkAuto, "Automatic Link"},
+		{"Account Linking", ActionLinkManual, "Manual Link"},
+		{"Account Linking", ActionLinkFailed, "Link Failed"},
+		{"Account Linking", ActionMappingReset, "Mapping Deleted"},
+		{"Account Linking", ActionMappingResetAll, "All Mappings Deleted"},
+
+		{"Identity Providers", ActionIDPCreate, "Provider Created"},
+		{"Identity Providers", ActionIDPUpdate, "Provider Updated"},
+		{"Identity Providers", ActionIDPDelete, "Provider Deleted"},
+		{"Identity Providers", ActionIDPToggle, "Provider Enabled/Disabled"},
+		{"Identity Providers", ActionIDPTestConnection, "Connection Test"},
+
+		{"MFA Providers", ActionMFACreate, "MFA Provider Created"},
+		{"MFA Providers", ActionMFAUpdate, "MFA Provider Updated"},
+		{"MFA Providers", ActionMFADelete, "MFA Provider Deleted"},
+		{"MFA Providers", ActionMFAToggle, "MFA Provider Enabled/Disabled"},
+
+		{"Administration", ActionAdminGroupAdd, "Admin Group Added"},
+		{"Administration", ActionAdminGroupDelete, "Admin Group Removed"},
+		{"Administration", ActionSMTPUpdate, "SMTP Updated"},
+		{"Administration", ActionSMTPTest, "Test Email Sent"},
+		{"Administration", ActionEmailTemplateUpdate, "Email Template Updated"},
+		{"Administration", ActionEmailTemplateReset, "Email Template Reset"},
+
+		{"Scheduled Jobs", ActionExpirationNotification, "Expiration Notice Sent"},
+		{"Scheduled Jobs", ActionExpiredNotification, "Expired Notice Sent"},
+		{"Scheduled Jobs", ActionExpirationConfigUpdate, "Expiration Config Changed"},
+		{"Scheduled Jobs", ActionReportSent, "Report Sent"},
+		{"Scheduled Jobs", ActionReportConfigUpdate, "Report Config Changed"},
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -433,5 +434,150 @@ func TestReadUserAttribute_NotFound(t *testing.T) {
 	_, err := readUserAttribute(mock, "uid=notexist,dc=example,dc=com", "mail")
 	if err == nil {
 		t.Error("expected error when entry not found")
+	}
+}
+
+// --- searchADExpiredUsers / searchFreeIPAExpiredUsers ---
+//
+// These drive the "already expired" notification, which emails every matching
+// account in the directory. The daysAfterExpiration lower bound is what keeps a
+// first run from mailing years of dormant accounts, so it is pinned here.
+
+// adFileTime renders a pwdLastSet value that puts a password's expiry at
+// expiresAt, given the domain's maximum password age.
+func adFileTime(expiresAt time.Time, maxPwdAge time.Duration) string {
+	const epochDiff = 11644473600
+	return fmt.Sprintf("%d", (expiresAt.Add(-maxPwdAge).Unix()+epochDiff)*10000000)
+}
+
+func TestSearchADExpiredUsers(t *testing.T) {
+	maxPwdAge := 90 * 24 * time.Hour
+	now := time.Now()
+
+	entries := []*ldap.Entry{
+		newTestEntry("CN=recent,DC=example,DC=com", map[string][]string{
+			"sAMAccountName": {"recent"},
+			"pwdLastSet":     {adFileTime(now.Add(-3*24*time.Hour), maxPwdAge)},
+			"mail":           {"recent@example.com"},
+		}),
+		newTestEntry("CN=dormant,DC=example,DC=com", map[string][]string{
+			"sAMAccountName": {"dormant"},
+			"pwdLastSet":     {adFileTime(now.Add(-400*24*time.Hour), maxPwdAge)},
+			"mail":           {"dormant@example.com"},
+		}),
+		newTestEntry("CN=current,DC=example,DC=com", map[string][]string{
+			"sAMAccountName": {"current"},
+			"pwdLastSet":     {adFileTime(now.Add(10*24*time.Hour), maxPwdAge)},
+			"mail":           {"current@example.com"},
+		}),
+		newTestEntry("CN=never,DC=example,DC=com", map[string][]string{
+			"sAMAccountName": {"never"},
+			"pwdLastSet":     {"0"},
+		}),
+		newTestEntry("CN=garbage,DC=example,DC=com", map[string][]string{
+			"sAMAccountName": {"garbage"},
+			"pwdLastSet":     {"not-a-filetime"},
+		}),
+	}
+
+	tests := []struct {
+		name                string
+		daysAfterExpiration int
+		want                []string
+	}{
+		{"bounded lookback excludes long-dormant accounts", 7, []string{"recent"}},
+		{"unlimited lookback includes them", -1, []string{"recent", "dormant"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockLDAPConn{searchResult: &ldap.SearchResult{Entries: entries}}
+			users, err := searchADExpiredUsers(mock, "dc=example,dc=com", "", "mail", maxPwdAge, tt.daysAfterExpiration)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var got []string
+			for _, u := range users {
+				got = append(got, u.Username)
+				// An expired password must report negative days remaining;
+				// a positive value would render as "expires in N days".
+				if u.DaysRemaining > 0 {
+					t.Errorf("%s: DaysRemaining = %d, want <= 0", u.Username, u.DaysRemaining)
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchADExpiredUsers_SearchError(t *testing.T) {
+	mock := &mockLDAPConn{searchErr: errors.New("LDAP search failed")}
+	if _, err := searchADExpiredUsers(mock, "dc=example,dc=com", "", "mail", 90*24*time.Hour, -1); err == nil {
+		t.Error("expected error from search failure")
+	}
+}
+
+func TestSearchFreeIPAExpiredUsers(t *testing.T) {
+	now := time.Now()
+	entries := []*ldap.Entry{
+		newTestEntry("uid=recent,cn=users,dc=example,dc=com", map[string][]string{
+			"uid":                   {"recent"},
+			"krbPasswordExpiration": {now.Add(-3 * 24 * time.Hour).Format("20060102150405Z")},
+			"mail":                  {"recent@example.com"},
+		}),
+		newTestEntry("uid=dormant,cn=users,dc=example,dc=com", map[string][]string{
+			"uid":                   {"dormant"},
+			"krbPasswordExpiration": {now.Add(-400 * 24 * time.Hour).Format("20060102150405Z")},
+		}),
+		newTestEntry("uid=current,cn=users,dc=example,dc=com", map[string][]string{
+			"uid":                   {"current"},
+			"krbPasswordExpiration": {now.Add(10 * 24 * time.Hour).Format("20060102150405Z")},
+		}),
+		newTestEntry("uid=blank,cn=users,dc=example,dc=com", map[string][]string{
+			"uid":                   {"blank"},
+			"krbPasswordExpiration": {""},
+		}),
+		newTestEntry("uid=garbage,cn=users,dc=example,dc=com", map[string][]string{
+			"uid":                   {"garbage"},
+			"krbPasswordExpiration": {"not-a-time"},
+		}),
+	}
+
+	tests := []struct {
+		name                string
+		daysAfterExpiration int
+		want                []string
+	}{
+		{"bounded lookback excludes long-dormant accounts", 7, []string{"recent"}},
+		{"unlimited lookback includes them", -1, []string{"recent", "dormant"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockLDAPConn{searchResult: &ldap.SearchResult{Entries: entries}}
+			users, err := searchFreeIPAExpiredUsers(mock, "dc=example,dc=com", "", "mail", tt.daysAfterExpiration)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var got []string
+			for _, u := range users {
+				got = append(got, u.Username)
+				if u.DaysRemaining > 0 {
+					t.Errorf("%s: DaysRemaining = %d, want <= 0", u.Username, u.DaysRemaining)
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchFreeIPAExpiredUsers_SearchError(t *testing.T) {
+	mock := &mockLDAPConn{searchErr: errors.New("LDAP search failed")}
+	if _, err := searchFreeIPAExpiredUsers(mock, "dc=example,dc=com", "", "mail", -1); err == nil {
+		t.Error("expected error from search failure")
 	}
 }

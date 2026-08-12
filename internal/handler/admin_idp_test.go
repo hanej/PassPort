@@ -2683,3 +2683,101 @@ func TestUploadLogo_UpdateIDPError(t *testing.T) {
 		t.Errorf("expected 500 when UpdateIDP fails, got %d; body: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestIDPCreate_ReservedID covers the "local" slug guard. The login page and
+// SetIDPArrangement both branch on that slug to mean the built-in Local Admin
+// card, so a real provider claiming it would be rendered and reordered as Local
+// Admin and could never be arranged.
+func TestIDPCreate_ReservedID(t *testing.T) {
+	env := setupIDPTest(t)
+	cookies := env.createAdminSession(t)
+
+	form := url.Values{}
+	form.Set("id", db.LocalAdminIDPID)
+	form.Set("friendly_name", "Impostor")
+	form.Set("provider_type", "ad")
+	form.Set("endpoint", "ldap.example.com:389")
+
+	rec := env.serveWithAdminSession(t, env.handler.Create, http.MethodPost, "/admin/idp", cookies, form.Encode())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected the form to be re-rendered with 200, got %d", rec.Code)
+	}
+	if _, err := env.db.GetIDP(context.Background(), db.LocalAdminIDPID); err == nil {
+		t.Error("expected no provider to be created for the reserved slug")
+	}
+}
+
+// The reserved slug list lives in the idp package but the meaning of "local"
+// comes from db. Keep the two in step.
+func TestReservedIDCoversLocalAdmin(t *testing.T) {
+	if !idp.IsReservedID(db.LocalAdminIDPID) {
+		t.Errorf("idp.IsReservedID(%q) = false; the built-in Local Admin slug must be reserved", db.LocalAdminIDPID)
+	}
+}
+
+// TestUploadLogo_RejectsIDPIDTraversal is a security regression test. The
+// destination filename is built from the IDP id, so an id containing path
+// separators would otherwise let an admin-authenticated request write outside
+// the uploads directory. The handler must refuse rather than create the file.
+func TestUploadLogo_RejectsIDPIDTraversal(t *testing.T) {
+	env := setupIDPTest(t)
+
+	const evilID = "../../../evil"
+	if err := env.db.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID:           evilID,
+		FriendlyName: "Traversal",
+		ProviderType: "ad",
+		Enabled:      true,
+		ConfigJSON:   `{"endpoint":"ldap://localhost:389","protocol":"ldap","base_dn":"dc=example,dc=com"}`,
+	}); err != nil {
+		t.Fatalf("seeding IDP: %v", err)
+	}
+
+	req := buildLogoUploadRequest(t, "logo.png", []byte("fake-png-data"))
+	req = withChiURLParam(req, "id", evilID)
+
+	rec := httptest.NewRecorder()
+	env.handler.UploadLogo(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected the upload to be refused, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(env.handler.uploadsDir + "/../evil.png"); !os.IsNotExist(err) {
+		t.Error("a file was written outside the uploads directory")
+	}
+}
+
+// diagnosingProvider is a provider that also reports non-fatal problems.
+type diagnosingProvider struct {
+	*mockProvider
+	warnings []string
+}
+
+func (d *diagnosingProvider) Diagnose(_ context.Context) []string { return d.warnings }
+
+func TestDiagnoseProvider(t *testing.T) {
+	t.Run("provider without diagnostics", func(t *testing.T) {
+		if got := diagnoseProvider(context.Background(), &mockProvider{}); got != nil {
+			t.Errorf("expected no warnings, got %v", got)
+		}
+	})
+
+	t.Run("healthy provider", func(t *testing.T) {
+		p := &diagnosingProvider{mockProvider: &mockProvider{}}
+		if got := diagnoseProvider(context.Background(), p); len(got) != 0 {
+			t.Errorf("expected no warnings, got %v", got)
+		}
+	})
+
+	t.Run("degraded provider", func(t *testing.T) {
+		p := &diagnosingProvider{
+			mockProvider: &mockProvider{},
+			warnings:     []string{"missing privilege"},
+		}
+		got := diagnoseProvider(context.Background(), p)
+		if len(got) != 1 || got[0] != "missing privilege" {
+			t.Errorf("expected the warning to be passed through, got %v", got)
+		}
+	})
+}

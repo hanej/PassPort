@@ -330,6 +330,18 @@ func (h *AdminIDPHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "local" is the built-in Local Admin card, which has no row here. A
+	// provider claiming it would be rendered and arranged as Local Admin.
+	if idp.IsReservedID(idpID) {
+		h.renderer.Render(w, r, "admin_idp_form.html", PageData{
+			Title:   "Add Identity Provider",
+			Session: sess,
+			Flash:   map[string]string{"category": "error", "message": "ID \"" + idpID + "\" is reserved for the built-in Local Admin card"},
+			Data:    map[string]any{"Mode": "create"},
+		})
+		return
+	}
+
 	cfg := h.parseIDPConfig(r)
 
 	configJSON, err := json.Marshal(cfg)
@@ -886,9 +898,15 @@ func (h *AdminIDPHandler) TestConnection(w http.ResponseWriter, r *http.Request)
 
 	result := audit.ResultSuccess
 	msg := "Connection successful"
+	status := "success"
 	if testErr != nil {
 		result = audit.ResultFailure
+		status = "error"
 		msg = testErr.Error()
+	} else if warnings := diagnoseProvider(r.Context(), provider); len(warnings) > 0 {
+		result = audit.ResultWarning
+		status = "warning"
+		msg = "Connected. " + strings.Join(warnings, " ")
 	}
 
 	h.audit.Log(r.Context(), &db.AuditEntry{
@@ -906,18 +924,20 @@ func (h *AdminIDPHandler) TestConnection(w http.ResponseWriter, r *http.Request)
 		"result", result,
 	)
 
-	if testErr != nil {
-		h.renderer.JSON(w, http.StatusOK, map[string]string{
-			"status":  "error",
-			"message": msg,
-		})
-		return
-	}
-
 	h.renderer.JSON(w, http.StatusOK, map[string]string{
-		"status":  "success",
+		"status":  status,
 		"message": msg,
 	})
+}
+
+// diagnoseProvider collects the non-fatal problems a connector can report, so a
+// missing optional privilege is found here instead of degrading a feature
+// silently at request time.
+func diagnoseProvider(ctx context.Context, provider idp.Provider) []string {
+	if d, ok := provider.(idp.DirectoryDiagnoser); ok {
+		return d.Diagnose(ctx)
+	}
+	return nil
 }
 
 // TestConnectionFromForm tests an IDP connection using form field values (not saved config).
@@ -1049,6 +1069,13 @@ func (h *AdminIDPHandler) TestConnectionFromForm(w http.ResponseWriter, r *http.
 	h.logger.Debug("TestConnectionFromForm successful",
 		"endpoint", cfg.Endpoint,
 	)
+	if warnings := diagnoseProvider(r.Context(), provider); len(warnings) > 0 {
+		h.renderer.JSON(w, http.StatusOK, map[string]string{
+			"status":  "warning",
+			"message": "Connected. " + strings.Join(warnings, " "),
+		})
+		return
+	}
 	h.renderer.JSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": "Connection successful",
@@ -1365,23 +1392,24 @@ func (h *AdminIDPHandler) parseIDPConfig(r *http.Request) idp.Config {
 	}
 
 	return idp.Config{
-		Endpoint:                  r.FormValue("endpoint"),
-		Protocol:                  r.FormValue("protocol"),
-		BaseDN:                    r.FormValue("base_dn"),
-		UserSearchBase:            r.FormValue("user_search_base"),
-		GroupSearchBase:           r.FormValue("group_search_base"),
-		Timeout:                   timeout,
-		TLSSkipVerify:             r.FormValue("tls_skip_verify") == "on",
-		PasswordComplexityHint:    r.FormValue("password_complexity_hint"),
-		SendNotification:          r.FormValue("send_notification") == "on",
-		NotificationEmailAttr:     r.FormValue("notification_email_attr"),
-		PasswordAllowUppercase:    r.FormValue("password_allow_uppercase") == "on",
-		PasswordAllowLowercase:    r.FormValue("password_allow_lowercase") == "on",
-		PasswordAllowDigits:       r.FormValue("password_allow_digits") == "on",
-		PasswordAllowSpecialChars: r.FormValue("password_allow_special") == "on",
-		PasswordSpecialChars:      r.FormValue("password_special_chars"),
-		PasswordLength:            pwLength,
-		URL:                       idp.NormalizeWebLinkURL(r.FormValue("weblink_url")),
+		Endpoint:                     r.FormValue("endpoint"),
+		Protocol:                     r.FormValue("protocol"),
+		BaseDN:                       r.FormValue("base_dn"),
+		UserSearchBase:               r.FormValue("user_search_base"),
+		GroupSearchBase:              r.FormValue("group_search_base"),
+		Timeout:                      timeout,
+		TLSSkipVerify:                r.FormValue("tls_skip_verify") == "on",
+		PasswordComplexityHint:       r.FormValue("password_complexity_hint"),
+		HideDiscoveredPasswordPolicy: r.FormValue("show_discovered_password_policy") != "on",
+		SendNotification:             r.FormValue("send_notification") == "on",
+		NotificationEmailAttr:        r.FormValue("notification_email_attr"),
+		PasswordAllowUppercase:       r.FormValue("password_allow_uppercase") == "on",
+		PasswordAllowLowercase:       r.FormValue("password_allow_lowercase") == "on",
+		PasswordAllowDigits:          r.FormValue("password_allow_digits") == "on",
+		PasswordAllowSpecialChars:    r.FormValue("password_allow_special") == "on",
+		PasswordSpecialChars:         r.FormValue("password_special_chars"),
+		PasswordLength:               pwLength,
+		URL:                          idp.NormalizeWebLinkURL(r.FormValue("weblink_url")),
 	}
 }
 

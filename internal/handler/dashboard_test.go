@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -32,7 +33,7 @@ func dashboardStubRenderer(t *testing.T) *Renderer {
 		"pages":    func(n int) []int { return nil },
 	}
 	pages := make(map[string]*template.Template)
-	pages["dashboard.html"] = template.Must(template.New("dashboard.html").Funcs(funcMap).Parse(`{{define "base"}}dashboard {{range .Data.Sections}}{{range .Panels}}{{.IDP.FriendlyName}} {{end}}{{end}}{{end}}`))
+	pages["dashboard.html"] = template.Must(template.New("dashboard.html").Funcs(funcMap).Parse(`{{define "base"}}dashboard {{range .Data.Sections}}{{range .Panels}}{{.IDP.FriendlyName}} policy={{with .PasswordPolicy}}{{.MinLength}}{{end}}| {{end}}{{end}}{{end}}`))
 	pages["error.html"] = template.Must(template.New("error.html").Funcs(funcMap).Parse(`{{define "base"}}error page{{end}}`))
 	pages["login.html"] = template.Must(template.New("login.html").Funcs(funcMap).Parse(`{{define "base"}}login page{{end}}`))
 
@@ -940,5 +941,82 @@ func TestChangePassword_LocalUser(t *testing.T) {
 	// Successful password change via local session → redirect to /dashboard.
 	if rec.Code != http.StatusFound {
 		t.Errorf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// linkedPanelEnv sets up a dashboard with one linked AD panel whose provider can
+// report the directory's password policy.
+func linkedPanelEnv(t *testing.T, cfgJSON string, policyErr error) *dashboardTestEnv {
+	t.Helper()
+	env := setupDashboardTest(t)
+	ctx := context.Background()
+
+	if err := env.db.CreateIDP(ctx, &db.IdentityProviderRecord{
+		ID: "corp-ad", FriendlyName: "Corp AD", ProviderType: "ad", Enabled: true, ConfigJSON: cfgJSON,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+	env.registry.Register("corp-ad", &mockPolicyProvider{
+		mockProvider: &mockProvider{id: "corp-ad", providerType: idp.ProviderTypeAD},
+		policy:       idp.PasswordPolicy{MinLength: 14, ComplexityEnabled: true},
+		policyErr:    policyErr,
+	})
+
+	now := time.Now().UTC()
+	if err := env.db.UpsertMapping(ctx, &db.UserIDPMapping{
+		AuthProviderID:  "local",
+		AuthUsername:    "admin",
+		TargetIDPID:     "corp-ad",
+		TargetAccountDN: "cn=admin,dc=example,dc=com",
+		LinkType:        "auto",
+		LinkedAt:        now,
+		VerifiedAt:      &now,
+	}); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+	return env
+}
+
+func TestShowDashboard_PasswordPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		configJSON string
+		policyErr  error
+		wantPolicy string
+	}{
+		{
+			name:       "shown by default",
+			configJSON: `{}`,
+			wantPolicy: "policy=14|",
+		},
+		{
+			name:       "suppressed by the IDP setting",
+			configJSON: `{"hide_discovered_password_policy":true}`,
+			wantPolicy: "policy=|",
+		},
+		{
+			// The directory stays the authority, so an unreadable policy must not
+			// stop the panel rendering.
+			name:       "unreadable policy still renders the panel",
+			configJSON: `{}`,
+			policyErr:  errors.New("insufficient access"),
+			wantPolicy: "policy=|",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := linkedPanelEnv(t, tt.configJSON, tt.policyErr)
+			cookies := env.createSessionWithCookies(t, "local", "", "admin", true)
+
+			rec := env.serveWithSession(t, env.handler.ShowDashboard, http.MethodGet, "/dashboard", cookies, "")
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+			}
+			if body := rec.Body.String(); !strings.Contains(body, tt.wantPolicy) {
+				t.Errorf("expected %q in body, got: %s", tt.wantPolicy, body)
+			}
+		})
 	}
 }

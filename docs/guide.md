@@ -45,7 +45,9 @@ Comprehensive documentation for PassPort, a self-service password management too
 make build          # Output: bin/passport
 
 # Cross-compile
-make build-all      # Outputs: bin/passport-linux-amd64, bin/passport-linux-arm64, bin/passport-windows-amd64.exe
+make build-all      # Outputs: bin/passport-linux-amd64, bin/passport-linux-arm64,
+                    #          bin/passport-macos-amd64, bin/passport-macos-arm64,
+                    #          bin/passport-windows-amd64.exe
 ```
 
 The build uses `CGO_ENABLED=0` with `-trimpath -ldflags="-s -w"` to produce a fully static binary.
@@ -61,6 +63,8 @@ The build uses `CGO_ENABLED=0` with `-trimpath -ldflags="-s -w"` to produce a fu
    ```
 
    If `config.yaml` does not exist, a default one is created automatically.
+
+   > **The generated config expects TLS certificates.** It listens on `:8443` and points `tls_cert`/`tls_key` at `/etc/passport/tls/`, which the package install script populates. Starting outside that layout fails with a missing-file error until you either point those paths at real certificates or blank them both, which drops the server to plain HTTP. Run `passport -example-config` to print the template without starting anything.
 
 3. **Retrieve the initial admin password** from the startup log output:
 
@@ -88,6 +92,26 @@ PassPort performs the following on every start:
 6. Loads all enabled identity providers into the live registry
 7. Starts the password expiration cron scheduler
 8. Begins listening for HTTP/HTTPS connections
+
+### Command-Line Reference
+
+| Flag | Purpose |
+|------|---------|
+| `-config <path>` | Path to the configuration file. Default `config.yaml`. |
+| `-version` | Print the build version and exit. |
+| `-example-config` | Print the example `config.yaml` to stdout and exit. |
+| `-backup <file>` | [Back up](#command-line-backup-secrets-stay-encrypted) configuration with secrets left encrypted, then exit. |
+| `-export <file>` | [Export](#command-line-export-secrets-decrypted) configuration with secrets decrypted, then exit. |
+| `-import <file>` | [Import](#command-line-import) a backup or export file, then exit. |
+| `-rename-idp <old>=<new>` | [Rename a provider slug](#changing-a-provider-id) offline, then exit. Stop the service first. |
+| `-reset-admin-password <user>` | [Reset a local admin password](#cli-reset-admin-password) and force a change at next login, then exit. |
+| `-force-password-change <user>` | [Force a local admin to change their password](#cli-force-password-change-at-next-login) at next login, then exit. |
+
+Every flag except `-config` causes PassPort to do its work and exit without starting the web server. The management flags read the database path from the config file, so pass `-config` alongside them on an installed system:
+
+```bash
+passport -config /etc/passport/config.yaml -reset-admin-password admin
+```
 
 ---
 
@@ -333,6 +357,8 @@ Selecting **Web Link** hides the fields that only apply to directories: Connecti
 
 > **URL restrictions:** Only absolute `http://` and `https://` URLs are accepted. Scheme-relative (`//example.com`), relative (`/path`), and non-web schemes (`javascript:`, `data:`, `file:`, `ftp:`) are rejected and stored as empty. A Web Link with no valid URL is hidden from the login page and dashboard rather than rendering a dead card.
 
+Because a Web Link has no directory behind it, it is excluded from password changes, account linking, correlation, password expiration notifications, reports, admin group membership, and the forgot-password flow. PassPort never sees or handles credentials for the target site — it is only a link.
+
 ### Markdown Fields
 
 Two fields accept Markdown, and both have a formatting toolbar above them:
@@ -381,7 +407,7 @@ What the command does:
 
 - Rewrites the slug in `identity_providers` and in every table that references it: attribute mappings, correlation rules, expiration configuration and filters, admin groups, report configuration and filters, user account links (both `target_idp_id` **and** `auth_provider_id`), correlation warnings, and sessions. The whole rename runs in one transaction with deferred foreign key enforcement, then verifies the result with `PRAGMA foreign_key_check`. A failure rolls back and changes nothing.
 - Moves the uploaded logo, whose filename embeds the slug (`uploads/idp-logo-<slug>.<ext>`), and updates `logo_url`. A logo pointing somewhere else — an external URL, for example — is left alone.
-- Validates the new slug the same way the admin form does: lowercase letters, numbers, and hyphens.
+- Validates the new slug the same way the admin form does: lowercase letters, numbers, and hyphens. `local` is reserved for the built-in admin account and is refused.
 - Refuses to run if the provider does not exist, or if the new slug is already taken.
 
 What it deliberately does **not** do:
@@ -390,8 +416,6 @@ What it deliberately does **not** do:
 - **Update anything outside the database.** If you reference the slug in external monitoring, bookmarks, or documentation, update those yourself.
 
 The alternative is to delete and recreate the provider, but that cascades: attribute mappings, correlation rules, expiration configuration and filters, admin groups, user account links, and report configuration are all deleted, and users must link their accounts again.
-
-Because a Web Link has no directory behind it, it is excluded from password changes, account linking, correlation, password expiration notifications, reports, admin group membership, and the forgot-password flow. PassPort never sees or handles credentials for the target site — it is only a link.
 
 ### Random Password Policy
 
@@ -410,6 +434,8 @@ The Random Password Policy controls what that generated temp password looks like
 At least one character class must be enabled. If a directory's password policy prohibits certain characters (for example, some systems reject `!` or `@`), remove them from the special characters field or leave it blank.
 
 > **Note:** These settings only affect the auto-generated temporary password used during the forgot-password MFA flow. They do not restrict what users can set as their new password.
+
+The same **Password Settings** card also holds the complexity hint and the **Show discovered password rules** switch, both of which *are* shown to users — see [Password Complexity Hints](#password-complexity-hints) and [Automatic Password Policy Detection](#automatic-password-policy-detection).
 
 ### Connection Protocols
 
@@ -432,6 +458,28 @@ The service account needs sufficient privileges to:
 - Modify the password attribute (unicodePwd for AD, userPassword for FreeIPA)
 - Read group membership
 - Modify lockoutTime and userAccountControl (AD only, for unlock/enable)
+
+#### FreeIPA Privileges
+
+FreeIPA does not grant most of these to an ordinary account, so the service account must be given a role. Only the features you actually use need their privilege:
+
+| Feature | Permission required | Shipped privilege that grants it |
+|---------|--------------------|-----------------------------------|
+| Login, correlation, expiry reports and notifications | *System: Read User Standard / Kerberos / IPA Attributes*, *System: Read User Membership* | Granted to all authenticated users — nothing to do |
+| Forgot-password reset | *System: Change User password* | **Modify Users and Reset passwords** |
+| Password policy detection | *System: Read Group Password Policy*, *System: Read Group Password Policy costemplate* | **Password Policy Readers** |
+| Unlock and enable account | *System: Unlock User* | **User Administrators** |
+
+```bash
+ipa role-add 'PassPort Service' --desc='PassPort self-service password management'
+ipa role-add-privilege 'PassPort Service' --privileges='Modify Users and Reset passwords'
+ipa role-add-privilege 'PassPort Service' --privileges='Password Policy Readers'
+ipa role-add-member 'PassPort Service' --users=svc-passport
+```
+
+> **Members of `cn=admins` cannot be reset.** FreeIPA's *System: Change User password* permission explicitly excludes them, so the forgot-password flow will fail for those accounts regardless of which role the service account holds. Use `ipa passwd` for administrators.
+
+**Test Connection** verifies the bind, then reads the global password policy. If the policy is unreadable it returns a warning naming the *Password Policy Readers* privilege, so a missing grant is found once here rather than quietly degrading the rule checklist for every user. The write permissions above are not checked, since doing so would mean attempting a write against a real account.
 
 ### Attribute Mappings
 
@@ -466,6 +514,8 @@ Example: If a user logs in via AD where `employeeID=12345`, and FreeIPA has `emp
 ### Test Connection
 
 Use the **Test Connection** button (available on both the create and edit forms) to verify that the service account can bind to the directory before saving.
+
+A test can come back in three states: success, failure, or a **warning** — the bind worked but something optional is missing. The only warning raised today is a FreeIPA service account that cannot read password policies; see [FreeIPA Privileges](#freeipa-privileges). Warnings are recorded in the audit log alongside successes and failures.
 
 For a **Web Link**, there is no directory to test, so the button opens the configured URL in a new tab instead. If the URL is missing or not a valid `http(s)` address, the button reports an error rather than opening anything.
 
@@ -556,9 +606,11 @@ From the dashboard, users can change their password on any linked IDP:
 1. Select the target provider
 2. Enter the current password (verified against the directory)
 3. Enter and confirm the new password
-4. Password complexity hints are displayed if configured for the IDP
+4. The IDP's password complexity hint is displayed if configured, along with a live checklist of the rules read from the directory itself — see [Automatic Password Policy Detection](#automatic-password-policy-detection)
 
 If an MFA provider is enabled, password changes may require MFA verification first.
+
+Password changes are rate limited per account — see [Security](#16-security).
 
 ### Linking Accounts
 
@@ -599,6 +651,27 @@ Example hint:
 ```
 
 For the full Markdown syntax reference, see [markdownguide.org/basic-syntax](https://www.markdownguide.org/basic-syntax/).
+
+### Automatic Password Policy Detection
+
+Alongside the hint you write yourself, PassPort reads the rules the directory actually enforces and shows them as a live checklist on the change-password and reset-password pages, ticking each rule off as the user types.
+
+| | Active Directory | FreeIPA / Red Hat IdM |
+|---|---|---|
+| Per-user policy | `msDS-ResultantPSO` (fine-grained password policy) | `krbPwdPolicyReference`, else the Class of Service template for the user's highest-priority group |
+| Fallback | Domain head, located via the RootDSE `defaultNamingContext` | `cn=global_policy` under the Kerberos realm container |
+| Minimum length | `minPwdLength` / `msDS-MinimumPasswordLength` | `krbPwdMinLength` |
+| Character classes | `pwdProperties` bit 0 — fixed at 3 of 4 when enabled | `krbPwdMinDiffChars` — any count from 1 to 5 |
+| Name check | Implied by complexity (MS-ADTS 3.1.1.13.1) | `ipaPwdUserCheck`, a separate switch |
+| Minimum age | `minPwdAge` / `msDS-MinimumPasswordAge` | `krbMinPwdLife` |
+
+The resulting rules are shown as a live checklist on every form that sets a password: the dashboard change-password panel, the forgot-password reset page, and the forced change page after an expired AD password. **Show discovered password rules** under *Password Settings* turns this off per IDP, leaving only the complexity hint you wrote. It is on by default, and turning it off also skips the directory lookup.
+
+On FreeIPA this needs the **Password Policy Readers** privilege — see [Service Accounts](#service-accounts). Without it the policy entries are invisible and the checklist is simply omitted; **Test Connection** reports this so the missing grant is visible to the administrator.
+
+The checklist is guidance only. The directory remains the authority on whether a password is acceptable — it alone knows the password history — so if the policy cannot be read the change still proceeds normally. Two FreeIPA rules are not shown: MIT Kerberos counts a fifth character class outside printable ASCII, so a `minclasses` of 5 is displayed as 4; and the libpwquality options (`maxrepeat`, `maxsequence`, `dictcheck` and the character credits) have no checklist equivalent. Use the complexity hint to describe those.
+
+The minimum age is also enforced by PassPort during a self-service reset. That flow stages a temporary password through the service account, which exempts the subsequent change from the directory's own minimum-age check in both AD and FreeIPA; without an equivalent gate a user could cycle through the password history to reuse an old password. A user blocked this way is told when their next change will be allowed. If the policy cannot be read the reset continues and the audit log records that the gate was skipped, as a **Warning** result rather than a failure.
 
 ---
 
@@ -695,7 +768,7 @@ Use the **Test Connection** button to verify the credentials against the Duo API
 
 ### Email OTP
 
-Email OTP sends a numeric one-time passcode to the user's email address. It requires [SMTP to be configured](#8-email-configuration) and the IDP to have an `email` attribute mapping pointing to the user's email attribute in the directory.
+Email OTP sends a numeric one-time passcode to the user's email address. It requires [SMTP to be configured](#10-email-configuration) and the IDP to have an `email` attribute mapping pointing to the user's email attribute in the directory.
 
 #### Configuring an Email OTP Provider
 
@@ -747,6 +820,7 @@ Navigate to **Admin > Identity Providers > Expiration** for the target IDP.
 | Enabled | Turn the cron job on or off | `true` |
 | Cron Schedule | Standard cron expression (5-field) | `0 8 * * *` (daily at 8 AM) |
 | Days Before Expiration | Notify users whose password expires within this many days | `14` |
+| Days After Expiration | Keep notifying users whose password has *already* expired. `0` disables it, `-1` notifies indefinitely, a positive number stops after that many days | `7` |
 
 ### Cron Schedule Syntax
 
@@ -772,6 +846,20 @@ Examples:
 **Active Directory:** PassPort reads the domain's `maxPwdAge` policy from the root DSE, then searches for users whose `pwdLastSet` attribute indicates their password will expire within the configured threshold.
 
 **FreeIPA:** PassPort reads the `krbPasswordExpiration` attribute to determine when each user's password expires.
+
+### Expired Account Notices
+
+A user who ignores every warning stops being notified the moment the password actually expires — which is when they most need telling. **Days After Expiration** keeps the reminders coming on the same cron run:
+
+| Value | Behaviour |
+|-------|-----------|
+| `0` | Disabled. Only users approaching expiration are notified. This is the default. |
+| `-1` | Every expired account is notified on every run, with no cutoff. |
+| `N` | Accounts that expired within the last `N` days are notified; older ones are left alone. |
+
+A positive value is usually what you want. `-1` will keep mailing accounts that expired years ago — long-abandoned or service accounts included — unless an exclusion filter catches them.
+
+Expired notices use their own template (`password_expired`) so the wording can differ from the warning email, and are recorded in the audit log as `expired_notification` rather than `expiration_notification`. Exclusion filters apply to both scans.
 
 ### Exclusion Filters
 
@@ -799,6 +887,8 @@ The **Dry Run** button scans the directory and evaluates all filters without sen
 - Which users are excluded and which filter matched
 - Each user's expiration date and days remaining
 
+If **Days After Expiration** is set, already-expired accounts are listed separately, with days *since* expiration in place of days remaining.
+
 Use dry runs to verify your filter configuration before enabling the live cron job.
 
 ### Running Immediately
@@ -807,7 +897,7 @@ The **Run Now** button executes the notification job immediately (outside the cr
 
 ### Per-IDP Email Templates
 
-Each IDP can have its own password expiration email template. If no IDP-specific template exists, the global `password_expiration` template is used. See [Email Templates](#9-email-templates) for details.
+Each IDP can have its own templates for both messages: `password_expiration` for the warning and `password_expired` for the notice sent after expiration. If no IDP-specific template exists, the global one is used. See [Email Templates](#11-email-templates) for details.
 
 ### Schedule Reloading
 
@@ -914,7 +1004,7 @@ Reports use separate email templates from expiration notifications:
 | `expired_accounts_report` | Expired Accounts report emails |
 | `expired_accounts_report:<idp_id>` | Per-IDP override for the expired accounts report |
 
-See [Email Templates](#10-email-templates) for how to edit templates.
+See [Email Templates](#11-email-templates) for how to edit templates.
 
 ### Schedule Reloading
 
@@ -969,8 +1059,10 @@ PassPort uses HTML email templates for all outbound messages. Templates are edit
 
 | Type | Used For |
 |------|----------|
-| `password_expiration` | Password expiration notification emails |
-| `password_expiration:<idp_id>` | Per-IDP override for expiration notifications |
+| `password_expiration` | Password expiration warning emails |
+| `password_expiration:<idp_id>` | Per-IDP override for expiration warnings |
+| `password_expired` | Notices sent after a password has already expired |
+| `password_expired:<idp_id>` | Per-IDP override for expired notices |
 | `expiration_report` | Soon-to-Expire Passwords report emails |
 | `expiration_report:<idp_id>` | Per-IDP override for the soon-to-expire report |
 | `expired_accounts_report` | Expired Accounts report emails |
@@ -988,6 +1080,17 @@ Variables are inserted using Go template syntax: `{{.VariableName}}`.
 | `{{.ProviderName}}` | Friendly name of the IDP | `Corporate AD` |
 | `{{.ExpirationDate}}` | Formatted expiration date and time | `Jan 15, 2026 3:00 PM EST` |
 | `{{.DaysRemaining}}` | Number of days until expiration | `7` |
+
+**Expired Password Templates (password_expired):**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{{.Username}}` | User's login name | `jdoe` |
+| `{{.ProviderName}}` | Friendly name of the IDP | `Corporate AD` |
+| `{{.ExpirationDate}}` | When the password expired | `Jan 15, 2026 3:00 PM EST` |
+| `{{.DaysExpired}}` | Number of days since expiration | `3` |
+
+> `{{.DaysRemaining}}` is not available in an expired template, and `{{.DaysExpired}}` is not available in a warning template. Referencing the wrong one leaves it blank rather than failing to send.
 
 **Report Templates (expiration_report and expired_accounts_report):**
 
@@ -1122,6 +1225,7 @@ PassPort maintains a dual audit log for all security-relevant events.
 | `email_template_update` | Email template modified |
 | `email_template_reset` | Email template reset to default |
 | `expiration_notification` | Expiration email sent |
+| `expired_notification` | Already-expired email sent |
 | `expiration_config_update` | Expiration config changed |
 | `report_config_update` | Report configuration changed |
 | `report_sent` | Report email sent to recipients |
@@ -1131,9 +1235,12 @@ PassPort maintains a dual audit log for all security-relevant events.
 The admin audit log viewer at **Admin > Audit** supports filtering by:
 
 - Username
-- Action type
-- Result (success/failure)
+- Action type (grouped by area; the list is generated from the actions above, so it always matches what can be recorded)
+- Result (success/warning/failure)
+- Provider
 - Date range (start/end)
+
+A **warning** marks an action that completed with a caveat rather than one that failed — for example a password reset that went through while the minimum-age check could not be verified.
 
 Results are paginated.
 
@@ -1245,13 +1352,15 @@ All state-changing operations (POST requests) are protected by CSRF tokens using
 
 PassPort uses in-memory token-bucket rate limiting:
 
-| Endpoint | Rate | Burst |
-|----------|------|-------|
-| Login (`/login`) | 1 req/sec | 10 |
-| Forgot password (`/forgot-password`) | 1 req/sec | 10 |
-| Link account (`/dashboard/link-account`) | 0.5 req/sec | 5 |
+| Endpoint | Rate | Burst | Keyed on |
+|----------|------|-------|----------|
+| Login (`/login`) | 1 req/sec | 10 | Client IP |
+| Forgot password (`/forgot-password`) | 1 req/sec | 10 | Client IP |
+| Link account (`/dashboard/link-account`) | 0.5 req/sec | 5 | Client IP |
+| Change password (`/dashboard/change-password`) | 0.2 req/sec | 5 | Account |
+| Forced change (`/ad-change-password`) | 0.2 req/sec | 5 | Account |
 
-Rate limits are applied per client IP address. Stale buckets are cleaned up every 10 minutes (30-minute inactivity threshold).
+The two password-change endpoints bind to the directory with the user's *current* password, so an unthrottled loop could drive the account into lockout. They are keyed on the authenticated account rather than the client IP, so one user cannot exhaust the budget for everyone else behind the same NAT or reverse proxy; the burst of 5 stays under the common Active Directory lockout threshold. Every other limiter is keyed on the client IP, and login and forgot-password share a single bucket per IP rather than one each. Stale buckets are cleaned up every 10 minutes (30-minute inactivity threshold).
 
 ### TLS
 
@@ -1684,19 +1793,22 @@ Returns `200 OK` if the application is ready to serve traffic. Checks:
 livenessProbe:
   httpGet:
     path: /healthz
-    port: 8080
+    port: 8443
+    scheme: HTTPS
   periodSeconds: 10
 
 readinessProbe:
   httpGet:
     path: /readyz
-    port: 8080
+    port: 8443
+    scheme: HTTPS
   periodSeconds: 5
 ```
 
 **systemd healthcheck (via ExecStartPost or monitoring script):**
 ```bash
-curl -sf http://localhost:8080/readyz || exit 1
+# -k skips verification of the self-signed certificate generated at install time
+curl -skf https://localhost:8443/readyz || exit 1
 ```
 
 **HAProxy:**
@@ -1704,6 +1816,8 @@ curl -sf http://localhost:8080/readyz || exit 1
 option httpchk GET /readyz
 http-check expect status 200
 ```
+
+Adjust the port and scheme if you changed `server.addr` or run without TLS.
 
 ## 20. Backup & Migration
 

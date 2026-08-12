@@ -1662,3 +1662,125 @@ func TestRunReportForIDP_DecryptSecretsError(t *testing.T) {
 		t.Error("expected error when decrypting secrets fails")
 	}
 }
+
+// TestReportBuildEmailConfig_Secrets covers the encrypted-credentials half of
+// the report SMTP config, which is skipped entirely when no secret blob is set.
+func TestReportBuildEmailConfig_Secrets(t *testing.T) {
+	database := openTestDB(t)
+	cryptoSvc := newCryptoService(t)
+	rs := NewReportScheduler(database, idp.NewRegistry(testLogger()), cryptoSvc, newAuditLogger(t, database), testLogger())
+
+	const cfgJSON = `{"host":"smtp.example.com","port":"25","enabled":true}`
+
+	t.Run("valid credentials are decrypted", func(t *testing.T) {
+		blob, err := cryptoSvc.Encrypt([]byte(`{"username":"relay","password":"s3cret"}`))
+		if err != nil {
+			t.Fatalf("encrypting secrets: %v", err)
+		}
+
+		cfg, err := rs.buildEmailConfig(&db.SMTPConfig{ConfigJSON: cfgJSON, SecretBlob: blob})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Username != "relay" || cfg.Password != "s3cret" {
+			t.Errorf("credentials = %q/%q, want relay/s3cret", cfg.Username, cfg.Password)
+		}
+	})
+
+	t.Run("undecryptable blob", func(t *testing.T) {
+		_, err := rs.buildEmailConfig(&db.SMTPConfig{ConfigJSON: cfgJSON, SecretBlob: []byte("not ciphertext")})
+		if err == nil || !strings.Contains(err.Error(), "decrypting SMTP secrets") {
+			t.Errorf("expected a decrypt error, got %v", err)
+		}
+	})
+
+	t.Run("decrypts to malformed JSON", func(t *testing.T) {
+		blob, err := cryptoSvc.Encrypt([]byte(`{"username":`))
+		if err != nil {
+			t.Fatalf("encrypting secrets: %v", err)
+		}
+
+		_, err = rs.buildEmailConfig(&db.SMTPConfig{ConfigJSON: cfgJSON, SecretBlob: blob})
+		if err == nil || !strings.Contains(err.Error(), "parsing SMTP secrets") {
+			t.Errorf("expected a parse error, got %v", err)
+		}
+	})
+}
+
+// TestRunReportForIDP_IDPSecretFailures covers the encrypted service-account
+// credentials on the IDP record itself.
+func TestRunReportForIDP_IDPSecretFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		blob func(t *testing.T, rs *ReportScheduler) []byte
+	}{
+		{
+			name: "undecryptable secret blob",
+			blob: func(t *testing.T, _ *ReportScheduler) []byte { return []byte("not ciphertext") },
+		},
+		{
+			name: "secret blob decrypts to malformed JSON",
+			blob: func(t *testing.T, rs *ReportScheduler) []byte {
+				blob, err := rs.crypto.Encrypt([]byte(`{"service_account_username":`))
+				if err != nil {
+					t.Fatalf("encrypting secrets: %v", err)
+				}
+				return blob
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := openTestDB(t)
+			rs := newReportScheduler(t, database)
+
+			cfgJSON, _ := json.Marshal(idp.Config{
+				Endpoint: "ldap://localhost:389",
+				Protocol: "ldap",
+				BaseDN:   "dc=example,dc=com",
+			})
+			if err := database.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+				ID:           "corp-ad",
+				FriendlyName: "Corp AD",
+				ProviderType: "ad",
+				Enabled:      true,
+				ConfigJSON:   string(cfgJSON),
+				SecretBlob:   tt.blob(t, rs),
+			}); err != nil {
+				t.Fatalf("creating IDP: %v", err)
+			}
+			testEnabledReportConfig(t, database, "corp-ad", db.ReportTypeExpiration)
+
+			if err := rs.RunReportForIDP(context.Background(), "corp-ad", db.ReportTypeExpiration); err == nil {
+				t.Error("expected an error when the IDP secrets cannot be read")
+			}
+		})
+	}
+}
+
+// TestRunReportForIDP_InvalidFilterRegex verifies a bad exclusion pattern is
+// skipped rather than aborting the whole report.
+func TestRunReportForIDP_InvalidFilterRegex(t *testing.T) {
+	database := openTestDB(t)
+	rs := newReportScheduler(t, database)
+
+	testSetupADIDP(t, database, "corp-ad")
+	testEnabledReportConfig(t, database, "corp-ad", db.ReportTypeExpiration)
+	testSMTPConfig(t, database)
+	testReportEmailTemplate(t, database, "password_expiration_report")
+	if err := database.SaveReportFilters(context.Background(), "corp-ad", db.ReportTypeExpiration, []db.ReportFilter{
+		{Attribute: "dn", Pattern: "([unclosed", Description: "broken"},
+	}); err != nil {
+		t.Fatalf("saving report filters: %v", err)
+	}
+
+	rs.connector = &mockLDAPConnector{conn: &mockLDAPConn{searches: []mockSearch{
+		{result: maxPwdAgeEntry("dc=example,dc=com")},
+		{result: emptySearchResult()},
+	}}}
+
+	if err := rs.RunReportForIDP(context.Background(), "corp-ad", db.ReportTypeExpiration); err != nil {
+		t.Errorf("an invalid filter must be skipped, not fatal: %v", err)
+	}
+}

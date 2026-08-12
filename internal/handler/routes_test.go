@@ -58,9 +58,11 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 
 	var loginLimiter *ratelimit.Limiter
 	var linkLimiter *ratelimit.Limiter
+	var pwChangeLimiter *ratelimit.Limiter
 	if withLimiters {
 		loginLimiter = ratelimit.NewLimiter(10, 10, logger)
 		linkLimiter = ratelimit.NewLimiter(10, 10, logger)
+		pwChangeLimiter = ratelimit.NewLimiter(10, 10, logger)
 	}
 
 	uploadsPath := uploadsDir
@@ -93,6 +95,7 @@ func buildTestRouter(t *testing.T, secureCookie bool, uploadsDir string, withLim
 		SecureCookie:        secureCookie,
 		LoginLimiter:        loginLimiter,
 		LinkLimiter:         linkLimiter,
+		PwChangeLimiter:     pwChangeLimiter,
 		UploadsDir:          uploadsPath,
 		Logger:              logger,
 	}

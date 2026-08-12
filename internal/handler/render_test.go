@@ -214,6 +214,9 @@ func TestFuncMap_PagesAddSubtract(t *testing.T) {
 	r.Render(w, req, "admin_mappings.html", PageData{
 		Title: "Mappings",
 		Data: map[string]any{
+			// admin_mappings.html hides the whole results card (and with it the
+			// pagination controls) unless a search has been performed.
+			"HasSearched":    true,
 			"SearchUsername": "jdoe",
 			"TotalPages":     3,
 			"CurrentPage":    2,
@@ -405,6 +408,7 @@ func TestFuncMap_FmtTimePointer(t *testing.T) {
 	r.Render(w, req, "admin_mappings.html", PageData{
 		Title: "Mappings",
 		Data: map[string]any{
+			"HasSearched":    true,
 			"SearchUsername": "jdoe",
 			"TotalPages":     1,
 			"CurrentPage":    1,
@@ -415,5 +419,34 @@ func TestFuncMap_FmtTimePointer(t *testing.T) {
 	})
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d; body: %s", w.Code, excerpt(w.Body.String()))
+	}
+}
+
+// TestForcedChangePage_RendersHintAsMarkdown pins the real template. The admin
+// authors the complexity hint in Markdown (the form's own placeholder suggests
+// bold text and a bullet list), so this page must render it rather than print
+// the asterisks and hyphens literally, as every other page showing the hint does.
+func TestForcedChangePage_RendersHintAsMarkdown(t *testing.T) {
+	logger := testLogger()
+	r, err := NewRenderer("", logger)
+	if err != nil {
+		t.Fatalf("NewRenderer: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ad-change-password", nil)
+	r.Render(w, req, "ad_force_password_change.html", PageData{
+		Title: "Change Password",
+		Data: map[string]any{
+			"ComplexityHint": "**Minimum 12 characters** including:\n- 1 number",
+		},
+	})
+
+	body := w.Body.String()
+	if !strings.Contains(body, "<strong>Minimum 12 characters</strong>") {
+		t.Errorf("expected the hint rendered as Markdown, got: %s", body)
+	}
+	if strings.Contains(body, "**Minimum 12 characters**") {
+		t.Error("hint was printed literally instead of rendered")
 	}
 }

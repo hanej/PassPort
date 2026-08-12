@@ -61,6 +61,7 @@ type RouterConfig struct {
 	TrustProxy          bool
 	LoginLimiter        *ratelimit.Limiter
 	LinkLimiter         *ratelimit.Limiter
+	PwChangeLimiter     *ratelimit.Limiter
 	UploadsDir          string
 	Logger              *slog.Logger
 }
@@ -167,7 +168,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 				// Force password change page (AD users)
 				r.Get("/ad-change-password", cfg.ADChangePassword.ShowChangePassword)
-				r.Post("/ad-change-password", cfg.ADChangePassword.ChangePassword)
+				r.Group(func(r chi.Router) {
+					if cfg.PwChangeLimiter != nil {
+						r.Use(ratelimit.Middleware(cfg.PwChangeLimiter, keyBySessionUser))
+					}
+					r.Post("/ad-change-password", cfg.ADChangePassword.ChangePassword)
+				})
 
 				// All other authenticated routes redirect to /change-password
 				// if the session has must_change_password set, and redirect to
@@ -178,8 +184,17 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 					// User dashboard
 					r.Get("/dashboard", cfg.Dashboard.ShowDashboard)
-					r.Post("/dashboard/change-password", cfg.Dashboard.ChangePassword)
 					r.Get("/dashboard/idp-status/{id}", cfg.Dashboard.IDPStatus)
+
+					// Password changes hit the directory with the user's current
+					// password, so an unthrottled loop can drive their own account
+					// into lockout.
+					r.Group(func(r chi.Router) {
+						if cfg.PwChangeLimiter != nil {
+							r.Use(ratelimit.Middleware(cfg.PwChangeLimiter, keyBySessionUser))
+						}
+						r.Post("/dashboard/change-password", cfg.Dashboard.ChangePassword)
+					})
 
 					// Manual IDP linking with rate limiting
 					r.Group(func(r chi.Router) {
@@ -287,6 +302,18 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	})
 
 	return r
+}
+
+// keyBySessionUser rate-limits password changes per authenticated account
+// rather than per IP, so one user hammering the directory cannot exhaust the
+// budget for everyone else behind the same NAT or proxy. It falls back to the
+// client IP when there is no session, which keeps the limiter useful if the
+// middleware order ever changes.
+func keyBySessionUser(r *http.Request) string {
+	if sess := auth.SessionFromContext(r.Context()); sess != nil && sess.Username != "" {
+		return sess.ProviderID + "/" + sess.Username
+	}
+	return ratelimit.KeyByIP(r)
 }
 
 // mirrorResolvedClientIP overwrites r.RemoteAddr with the client IP resolved

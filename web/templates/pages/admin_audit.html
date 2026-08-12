@@ -19,11 +19,14 @@
                 <label for="filter_action" class="form-label">Action</label>
                 <select class="form-select form-select-sm" id="filter_action" name="action">
                     <option value="">All Actions</option>
-                    <option value="login" {{if eq .Data.Filter.Action "login"}}selected{{end}}>Login</option>
-                    <option value="logout" {{if eq .Data.Filter.Action "logout"}}selected{{end}}>Logout</option>
-                    <option value="password_change" {{if eq .Data.Filter.Action "password_change"}}selected{{end}}>Password Change</option>
-                    <option value="link_account" {{if eq .Data.Filter.Action "link_account"}}selected{{end}}>Link Account</option>
-                    <option value="admin_config" {{if eq .Data.Filter.Action "admin_config"}}selected{{end}}>Admin Config</option>
+                    {{$filter := .Data.Filter.Action}}
+                    {{$group := ""}}
+                    {{range .Data.Actions}}
+                        {{if ne .Group $group}}{{if $group}}</optgroup>{{end}}<optgroup label="{{.Group}}">{{end}}
+                        {{$group = .Group}}
+                        <option value="{{.Value}}" {{if eq $filter .Value}}selected{{end}}>{{.Label}}</option>
+                    {{end}}
+                    {{if $group}}</optgroup>{{end}}
                 </select>
             </div>
             <div class="col-md-2">
@@ -31,6 +34,7 @@
                 <select class="form-select form-select-sm" id="filter_result" name="result">
                     <option value="">All Results</option>
                     <option value="success" {{if eq .Data.Filter.Result "success"}}selected{{end}}>Success</option>
+                    <option value="warning" {{if eq .Data.Filter.Result "warning"}}selected{{end}}>Warning</option>
                     <option value="failure" {{if eq .Data.Filter.Result "failure"}}selected{{end}}>Failure</option>
                 </select>
             </div>
@@ -101,6 +105,8 @@
                     <td>
                         {{if eq .Result "success"}}
                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Success</span>
+                        {{else if eq .Result "warning"}}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Warning</span>
                         {{else}}
                         <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failure</span>
                         {{end}}
@@ -179,6 +185,8 @@ document.addEventListener('DOMContentLoaded', function() {
         var resultEl = document.getElementById('audit-detail-result');
         if (row.dataset.result === 'success') {
             resultEl.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Success</span>';
+        } else if (row.dataset.result === 'warning') {
+            resultEl.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Warning</span>';
         } else {
             resultEl.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failure</span>';
         }

@@ -459,9 +459,29 @@ a.idp-group-heading:hover {
     border-left: 4px solid var(--pp-gray-200);
 }
 
+/* Bootstrap tints the expanded header blue, which reads as selected text. */
+.idp-accordion-item .accordion-button:not(.collapsed) {
+    background-color: transparent;
+    color: inherit;
+}
+
+/* The click that expands a panel leaves the button focused, and Bootstrap's
+   focus ring then reads as a blue border. Keyboard focus still shows it. */
+.idp-accordion-item .accordion-button:focus {
+    box-shadow: inset 0 calc(-1 * var(--bs-accordion-border-width)) 0 var(--bs-accordion-border-color);
+}
+
+.idp-accordion-item .accordion-button:focus-visible {
+    box-shadow: var(--bs-accordion-btn-focus-box-shadow);
+}
+
 .idp-accordion-item .accordion-body {
     padding-left: 2.5rem;
     padding-right: 2.5rem;
+}
+
+.idp-accordion-item .idp-accordion-desc {
+    padding: 0.5rem 3.25rem 0.75rem 1.25rem;
 }
 
 .idp-accordion-item.idp-card-ad {

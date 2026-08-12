@@ -39,6 +39,9 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("opening reader: %w", err)
 	}
 	reader.SetMaxOpenConns(10)
+	// Match idle to open: database/sql idles only 2 by default, so a burst would
+	// reopen the file and replay every PRAGMA on each extra read.
+	reader.SetMaxIdleConns(10)
 
 	if err := reader.Ping(); err != nil {
 		_ = writer.Close()

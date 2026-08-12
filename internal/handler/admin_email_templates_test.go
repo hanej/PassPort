@@ -876,3 +876,68 @@ func TestAdminEmailTemplatesEdit_ReportTemplateBase(t *testing.T) {
 		t.Errorf("unexpected zero status code")
 	}
 }
+
+// TestAdminEmailTemplatesList_PerIDPExpiredAndReport covers the friendly-name
+// branches for the per-IDP "expired" notice and the per-IDP report templates,
+// which are the two naming paths List handles after the expiration warning.
+func TestAdminEmailTemplatesList_PerIDPExpiredAndReport(t *testing.T) {
+	env := setupEmailTemplatesTest(t)
+	ctx := context.Background()
+
+	for _, templateType := range []string{"password_expired:corp-ad", "expiration_report:corp-ad", "expired_accounts_report:corp-ad"} {
+		if err := env.db.SaveEmailTemplate(ctx, &db.EmailTemplate{
+			TemplateType: templateType,
+			Subject:      "Subject for " + templateType,
+			BodyHTML:     "<p>body</p>",
+		}); err != nil {
+			t.Fatalf("saving %s: %v", templateType, err)
+		}
+	}
+
+	cookies := env.createAdminSession(t)
+	rec := env.serveWithAdminSession(t, env.handler.List, http.MethodGet, "/admin/email-templates", cookies, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAdminEmailTemplatesEdit_PerIDPFallbacks verifies that editing a per-IDP
+// template that has never been saved starts from the matching global default
+// rather than a blank form.
+func TestAdminEmailTemplatesEdit_PerIDPFallbacks(t *testing.T) {
+	tests := []struct {
+		name         string
+		globalType   string
+		templateType string
+	}{
+		{name: "expired notice", globalType: "password_expired", templateType: "password_expired:corp-ad"},
+		{name: "expiration report", globalType: "expiration_report", templateType: "expiration_report:corp-ad"},
+		{name: "expired accounts report", globalType: "expired_accounts_report", templateType: "expired_accounts_report:corp-ad"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupEmailTemplatesTest(t)
+			cookies := env.createAdminSession(t)
+
+			if err := env.db.SaveEmailTemplate(context.Background(), &db.EmailTemplate{
+				TemplateType: tt.globalType,
+				Subject:      "Global Subject",
+				BodyHTML:     "<p>Global body</p>",
+			}); err != nil {
+				t.Fatalf("saving global template: %v", err)
+			}
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r = withChiURLParam(r, "type", tt.templateType)
+				env.handler.Edit(w, r)
+			})
+			rec := env.serveWithAdminSession(t, handler, http.MethodGet, "/admin/email-templates/edit", cookies, "")
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("expected status 200, got %d; body: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

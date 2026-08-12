@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
 )
@@ -101,6 +102,7 @@ func (h *AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 			"TotalCount":  totalCount,
 			"BaseURL":     baseURL,
 			"Filter":      filter,
+			"Actions":     audit.FilterOptions(),
 			"ActivePage":  "audit",
 		},
 	})

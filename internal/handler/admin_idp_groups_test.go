@@ -716,3 +716,72 @@ func TestAdminIDPGroups_StoreErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestAdminIDPGroups_UpdateRejectsBadInput covers Update's input validation, which
+// mirrors Create's: a group name is required and is length-capped so it cannot be
+// used to stuff arbitrary content into the provider-selection page.
+func TestAdminIDPGroups_UpdateRejectsBadInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		urlID   string
+		groupID string
+	}{
+		{name: "non-numeric id", urlID: "not-a-number", groupID: "1"},
+		{name: "empty name", urlID: "1", groupID: ""},
+		{name: "name too long", urlID: "1", groupID: strings.Repeat("x", maxGroupNameLen+1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupIDPGroupTest(t)
+			cookies := env.adminSession(t)
+			env.createGroup(t, "Corporate")
+
+			form := url.Values{}
+			form.Set("name", tt.groupID)
+
+			req := httptest.NewRequest(http.MethodPost, "/admin/idp/groups/"+tt.urlID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			for _, c := range cookies {
+				req.AddCookie(c)
+			}
+			req = withChiURLParam(req, "id", tt.urlID)
+			rec := httptest.NewRecorder()
+			env.sm.Middleware(http.HandlerFunc(env.handler.Update)).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", rec.Code)
+			}
+		})
+	}
+}
+
+// TestAdminIDPGroups_ShowGroupedProvider verifies a provider assigned to a group
+// is rendered under that group rather than in the ungrouped bucket.
+func TestAdminIDPGroups_ShowGroupedProvider(t *testing.T) {
+	env := setupIDPGroupTest(t)
+	cookies := env.adminSession(t)
+	groupID := env.createGroup(t, "Corporate")
+
+	if err := env.db.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID:           "corp-ad",
+		FriendlyName: "Corp AD",
+		ProviderType: "ad",
+		Enabled:      true,
+		ConfigJSON:   `{"endpoint":"ldap://localhost:389","protocol":"ldap","base_dn":"dc=example,dc=com"}`,
+		GroupID:      &groupID,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/idp/groups", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	env.sm.Middleware(http.HandlerFunc(env.handler.Show)).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}

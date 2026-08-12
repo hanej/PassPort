@@ -60,34 +60,38 @@ function initPasswordToggles() {
 /* ---- Password Policy Validation ---- */
 
 /*
- * Mirrors Active Directory's complexity rule (MS-ADTS 3.1.1.13.1): three of five
- * character categories, and the password may contain neither the account name nor
- * any three-or-more character token of the display name. This is guidance only —
- * the directory still decides, and it alone knows the password history.
+ * Evaluates the rules the directory reported. Active Directory fixes its
+ * complexity rule at three of five categories plus a name check (MS-ADTS
+ * 3.1.1.13.1); FreeIPA makes the category count configurable and the name check
+ * a separate switch, so both are read from the markup rather than assumed. This
+ * is guidance only — the directory still decides, and it alone knows the
+ * password history.
  */
 function evaluatePasswordRules(rules, value) {
     var results = {};
 
     results.length = value.length >= rules.minLength;
 
-    if (!rules.complexity) return results;
-
-    var categories = 0;
-    if (/[A-Z]/.test(value)) categories++;
-    if (/[a-z]/.test(value)) categories++;
-    if (/[0-9]/.test(value)) categories++;
-    if (/[^A-Za-z0-9]/.test(value)) categories++;
-    results.categories = categories >= 3;
-
-    var lower = value.toLowerCase();
-    var ok = true;
-    if (rules.accountName && rules.accountName.length >= 3) {
-        if (lower.indexOf(rules.accountName.toLowerCase()) !== -1) ok = false;
+    if (rules.minCategories > 0) {
+        var categories = 0;
+        if (/[A-Z]/.test(value)) categories++;
+        if (/[a-z]/.test(value)) categories++;
+        if (/[0-9]/.test(value)) categories++;
+        if (/[^A-Za-z0-9]/.test(value)) categories++;
+        results.categories = categories >= rules.minCategories;
     }
-    (rules.displayName || '').split(/[,.\-_#\s\t]+/).forEach(function (token) {
-        if (token.length >= 3 && lower.indexOf(token.toLowerCase()) !== -1) ok = false;
-    });
-    results.name = ok;
+
+    if (rules.forbidUserName) {
+        var lower = value.toLowerCase();
+        var ok = true;
+        if (rules.accountName && rules.accountName.length >= 3) {
+            if (lower.indexOf(rules.accountName.toLowerCase()) !== -1) ok = false;
+        }
+        (rules.displayName || '').split(/[,.\-_#\s\t]+/).forEach(function (token) {
+            if (token.length >= 3 && lower.indexOf(token.toLowerCase()) !== -1) ok = false;
+        });
+        results.name = ok;
+    }
 
     return results;
 }
@@ -98,7 +102,8 @@ function readPasswordRules(form) {
     return {
         element: el,
         minLength: parseInt(el.getAttribute('data-min-length'), 10) || 0,
-        complexity: el.getAttribute('data-complexity') === '1',
+        minCategories: parseInt(el.getAttribute('data-min-categories'), 10) || 0,
+        forbidUserName: el.getAttribute('data-forbid-username') === '1',
         accountName: el.getAttribute('data-account-name') || '',
         displayName: el.getAttribute('data-display-name') || ''
     };
@@ -245,17 +250,20 @@ function initTestConnectionForms() {
             })
             .then(function (response) { return response.json(); })
             .then(function (data) {
-                alertEl.classList.remove('d-none', 'alert-success', 'alert-danger');
+                alertEl.classList.remove('d-none', 'alert-success', 'alert-warning', 'alert-danger');
                 if (data.status === 'success') {
                     alertEl.classList.add('alert-success');
                     alertEl.innerHTML = '<i class="bi bi-check-circle me-1"></i>' + escapeHtml(data.message || 'Connection successful');
+                } else if (data.status === 'warning') {
+                    alertEl.classList.add('alert-warning');
+                    alertEl.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>' + escapeHtml(data.message);
                 } else {
                     alertEl.classList.add('alert-danger');
                     alertEl.innerHTML = '<i class="bi bi-x-circle me-1"></i>' + escapeHtml(data.message || 'Connection failed');
                 }
             })
             .catch(function () {
-                alertEl.classList.remove('d-none', 'alert-success', 'alert-danger');
+                alertEl.classList.remove('d-none', 'alert-success', 'alert-warning', 'alert-danger');
                 alertEl.classList.add('alert-danger');
                 alertEl.innerHTML = '<i class="bi bi-x-circle me-1"></i>Request failed';
             })
@@ -315,6 +323,8 @@ function initTestConnectionButtons() {
         .then(function (data) {
             if (data.status === 'success') {
                 resultSpan.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Connection successful</span>';
+            } else if (data.status === 'warning') {
+                resultSpan.innerHTML = '<span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>' + escapeHtml(data.message) + '</span>';
             } else {
                 resultSpan.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + escapeHtml(data.message || 'Connection failed') + '</span>';
             }

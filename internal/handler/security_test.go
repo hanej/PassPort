@@ -817,3 +817,109 @@ func TestMFA_VerifiedSessionCanAccessApp(t *testing.T) {
 		t.Errorf("expected 200 for verified (non-MFA-pending) session on /dashboard, got %d", rec.Code)
 	}
 }
+
+// TestKeyBySessionUser_PerAccountBuckets covers the password-change limiter key.
+// Keying by IP would make every user behind one NAT or reverse proxy share a
+// budget, so one user's retries must not lock out another's.
+func TestKeyBySessionUser_PerAccountBuckets(t *testing.T) {
+	database := setupTestDB(t)
+	logger := testLogger()
+	sm := auth.NewSessionManager(database, 30*time.Minute, false, logger)
+	limiter := ratelimit.NewLimiter(0.0001, 1, testLogger())
+
+	newSession := func(username string) []*http.Cookie {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if _, err := sm.CreateSession(rec, req, "provider", "corp-ad", username, false, true); err != nil {
+			t.Fatalf("creating session for %s: %v", username, err)
+		}
+		return rec.Result().Cookies()
+	}
+
+	r := chi.NewRouter()
+	r.Use(sm.Middleware)
+	r.Use(ratelimit.Middleware(limiter, keyBySessionUser))
+	r.Post("/change-password", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	post := func(cookies []*http.Cookie) int {
+		req := httptest.NewRequest(http.MethodPost, "/change-password", nil)
+		req.RemoteAddr = "203.0.113.7:9000" // one shared egress IP
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	alice, bob := newSession("alice"), newSession("bob")
+
+	if code := post(alice); code != http.StatusOK {
+		t.Fatalf("alice's first attempt should pass, got %d", code)
+	}
+	if code := post(alice); code != http.StatusTooManyRequests {
+		t.Errorf("alice's second attempt should be limited, got %d", code)
+	}
+	if code := post(bob); code != http.StatusOK {
+		t.Errorf("bob shares alice's IP but not her bucket, got %d", code)
+	}
+}
+
+// TestKeyBySessionUser_FallsBackToIP covers the sessionless path. The session
+// middleware normally rejects these before the limiter runs, so the fallback
+// only matters if the middleware order ever changes — at which point the route
+// must still be limited rather than silently unlimited.
+func TestKeyBySessionUser_FallsBackToIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/change-password", nil)
+	req.RemoteAddr = "203.0.113.7:9000"
+
+	if got := keyBySessionUser(req); got != "203.0.113.7" {
+		t.Errorf("keyBySessionUser without a session = %q, want the client IP", got)
+	}
+}
+
+// TestChangePasswordRoutes_AreRateLimited pins the wiring: both change-password
+// POSTs must carry an extra middleware (the limiter) that the GET form does not,
+// so the forced-change page stays reachable while the submissions are throttled.
+func TestChangePasswordRoutes_AreRateLimited(t *testing.T) {
+	routes, ok := buildTestRouter(t, false, "", true).(chi.Routes)
+	if !ok {
+		t.Fatal("router does not expose chi.Routes")
+	}
+
+	counts := make(map[string]int)
+	err := chi.Walk(routes, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		counts[method+" "+route] = len(mws)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking routes: %v", err)
+	}
+
+	get := counts["GET /ad-change-password"]
+	for _, route := range []string{"POST /ad-change-password", "POST /dashboard/change-password"} {
+		if counts[route] <= get {
+			t.Errorf("%s has %d middlewares, want more than the %d on the unthrottled GET form",
+				route, counts[route], get)
+		}
+	}
+}
+
+// TestRateLimit_ChangePasswordRoutes verifies the limiter is actually mounted on
+// both change-password POST routes, and that the GET form stays unthrottled.
+func TestRateLimit_ChangePasswordRoutes(t *testing.T) {
+	// The AD form is a GET; throttling it would leave a user unable to even
+	// see the page they are forced onto.
+	router := buildTestRouter(t, false, "", true)
+	for i := range 40 {
+		req := httptest.NewRequest(http.MethodGet, "/ad-change-password", nil)
+		req.RemoteAddr = "198.51.100.10:9000"
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("GET /ad-change-password was rate-limited on attempt %d", i+1)
+		}
+	}
+}

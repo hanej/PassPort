@@ -480,3 +480,41 @@ func TestLog_ProviderNameNotOverwritten(t *testing.T) {
 		t.Errorf("expected ProviderName to remain %q, got %q", "My Custom Name", entry.ProviderName)
 	}
 }
+
+func TestFilterOptions(t *testing.T) {
+	opts := FilterOptions()
+
+	seen := make(map[string]bool, len(opts))
+	for _, o := range opts {
+		if o.Value == "" || o.Label == "" || o.Group == "" {
+			t.Errorf("incomplete option: %+v", o)
+		}
+		if seen[o.Value] {
+			t.Errorf("duplicate action %q", o.Value)
+		}
+		seen[o.Value] = true
+	}
+
+	// The viewer filters on an exact action match, so an option whose value is
+	// not a real action silently returns nothing.
+	for _, want := range []string{ActionLogin, ActionLinkAuto, ActionLinkManual, ActionExpiredNotification} {
+		if !seen[want] {
+			t.Errorf("action %q is recorded but cannot be filtered", want)
+		}
+	}
+
+	// The template opens an <optgroup> whenever the group changes, so a group
+	// that reappears later would produce a duplicate heading.
+	groupStart := make(map[string]int)
+	prev := ""
+	for i, o := range opts {
+		if o.Group == prev {
+			continue
+		}
+		if first, ok := groupStart[o.Group]; ok {
+			t.Errorf("group %q restarts at %d after beginning at %d", o.Group, i, first)
+		}
+		groupStart[o.Group] = i
+		prev = o.Group
+	}
+}

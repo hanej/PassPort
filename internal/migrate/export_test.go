@@ -2447,3 +2447,39 @@ func TestRunImport_ReportConfigWithFilters(t *testing.T) {
 		t.Errorf("expected 1 report config imported, got %d", result.ReportConfigs)
 	}
 }
+
+// TestExpirationConfig_DaysAfterRoundTrip pins that the expired-notice setting
+// survives a backup, since dropping it silently disables expired notifications
+// on the restored system.
+func TestExpirationConfig_DaysAfterRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	cryptoSvc := newCrypto(t)
+	seedIDP(t, src, cryptoSvc, "idp-1", "Corp AD")
+	if err := src.SaveExpirationConfig(ctx, &db.ExpirationConfig{
+		IDPID: "idp-1", Enabled: true, CronSchedule: "0 8 * * *",
+		DaysBeforeExpiration: 14, DaysAfterExpiration: -1,
+	}); err != nil {
+		t.Fatalf("saving expiration config: %v", err)
+	}
+
+	data, err := BuildBackup(ctx, src)
+	if err != nil {
+		t.Fatalf("building backup: %v", err)
+	}
+	if got := data.IdentityProviders[0].ExpirationConfig.DaysAfterExpiration; got != -1 {
+		t.Fatalf("backup DaysAfterExpiration = %d, want -1", got)
+	}
+
+	dst := openTestDB(t)
+	if _, err := RunImport(ctx, dst, cryptoSvc, data, AllSections()); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	restored, err := dst.GetExpirationConfig(ctx, "idp-1")
+	if err != nil {
+		t.Fatalf("reading restored config: %v", err)
+	}
+	if restored.DaysAfterExpiration != -1 {
+		t.Errorf("restored DaysAfterExpiration = %d, want -1", restored.DaysAfterExpiration)
+	}
+}

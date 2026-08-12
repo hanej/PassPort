@@ -99,6 +99,8 @@ type ExportExpirationConfig struct {
 	Enabled              bool   `json:"enabled"`
 	CronSchedule         string `json:"cron_schedule"`
 	DaysBeforeExpiration int    `json:"days_before_expiration"`
+	// Omitted by files written before expired notices existed, which decode as 0 (disabled).
+	DaysAfterExpiration int `json:"days_after_expiration"`
 }
 
 // ExportExpirationFilter represents an expiration filter in the export.
@@ -436,6 +438,7 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 				Enabled:              expCfg.Enabled,
 				CronSchedule:         expCfg.CronSchedule,
 				DaysBeforeExpiration: expCfg.DaysBeforeExpiration,
+				DaysAfterExpiration:  expCfg.DaysAfterExpiration,
 			}
 		}
 
@@ -725,6 +728,7 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 					Enabled:              ei.ExpirationConfig.Enabled,
 					CronSchedule:         ei.ExpirationConfig.CronSchedule,
 					DaysBeforeExpiration: ei.ExpirationConfig.DaysBeforeExpiration,
+					DaysAfterExpiration:  ei.ExpirationConfig.DaysAfterExpiration,
 				}
 				if err := store.SaveExpirationConfig(ctx, cfg); err != nil {
 					result.Errors = append(result.Errors, fmt.Sprintf("Failed to save expiration config for IDP %s: %v", ei.ID, err))

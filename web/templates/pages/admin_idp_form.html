@@ -273,6 +273,17 @@
                                    min="1" max="99">
                         </div>
                     </div>
+
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" id="show_discovered_password_policy"
+                               name="show_discovered_password_policy"
+                               {{if or (eq .Data.Mode "create") (not .Data.Config.HideDiscoveredPasswordPolicy)}}checked{{end}}>
+                        <label class="form-check-label" for="show_discovered_password_policy">Show discovered password rules</label>
+                        <div class="form-text">
+                            Reads the password policy from the directory and shows it to users as a live checklist
+                            alongside the hint. Turn this off to show only your own hint.
+                        </div>
+                    </div>
                 </div>
                 <div class="col-md-6">
                     <label for="password_hint" class="form-label">Password Complexity Hint</label>

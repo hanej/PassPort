@@ -364,8 +364,12 @@ func main() {
 	// Initialize rate limiters
 	loginLimiter := ratelimit.NewLimiter(1, 10, logger) // 1 req/s, burst 10
 	linkLimiter := ratelimit.NewLimiter(0.5, 5, logger) // 0.5 req/s, burst 5
+	// Burst 5 keeps a user under a typical AD lockout threshold of 5 bad
+	// attempts, then throttles to one try per 5s.
+	pwChangeLimiter := ratelimit.NewLimiter(0.2, 5, logger)
 	loginLimiter.StartCleanup(appCtx, 10*time.Minute)
 	linkLimiter.StartCleanup(appCtx, 10*time.Minute)
+	pwChangeLimiter.StartCleanup(appCtx, 10*time.Minute)
 
 	// Derive CSRF key from master key so it's stable across restarts.
 	// This prevents CSRF token invalidation when the server restarts.
@@ -446,6 +450,7 @@ func main() {
 		TrustProxy:          cfg.Server.TrustProxy,
 		LoginLimiter:        loginLimiter,
 		LinkLimiter:         linkLimiter,
+		PwChangeLimiter:     pwChangeLimiter,
 		UploadsDir:          uploadsDir,
 		Logger:              logger,
 	})

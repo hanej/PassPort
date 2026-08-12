@@ -15,10 +15,13 @@ PassPort is a single-binary Go web application that lets end users change and re
 ## Features
 
 - **Multi-directory support** -- Active Directory and FreeIPA via LDAP/LDAPS/STARTTLS
-- **Unified dashboard** -- users see all linked directory accounts in one place
+- **Unified dashboard** -- users see all linked directory accounts in one place, organised into collapsible provider groups
+- **Automatic password policy detection** -- reads the effective policy from AD or FreeIPA and shows users a live rule checklist as they type
 - **Forgot-password flow** -- self-service reset with optional Duo MFA verification
 - **Password expiration notifications** -- cron-scheduled emails with per-IDP templates
 - **Automatic account correlation** -- links user accounts across IDPs using configurable attribute rules
+- **Web Link providers** -- surface external self-service portals as cards alongside real directories
+- **Markdown descriptions** -- format provider descriptions and password hints with a built-in editor toolbar
 - **LDAP directory browser** -- browse and search directory trees from the admin UI
 - **Whitelabel branding** -- custom title, logo, subtitle, footer text, per-IDP logos
 - **Rich email templates** -- TinyMCE editor with preview, per-IDP overrides, template variables
@@ -35,7 +38,7 @@ PassPort is a single-binary Go web application that lets end users change and re
 - Go 1.26+
 - OpenSSL (for master key generation)
 
-> **Note:** PassPort has only been tested on Linux. While the project is designed to be cross-platform (builds available for macOS and Windows), production deployment is only supported on Linux systems.
+> **Note:** PassPort has only been tested on Linux. It builds and runs on macOS and Windows, but production deployment is only supported on Linux systems.
 
 ### Build
 
@@ -43,7 +46,7 @@ PassPort is a single-binary Go web application that lets end users change and re
 make build
 ```
 
-This produces `bin/passport`. Cross-compile for Linux/Windows/ARM64 with `make build-all`.
+This produces `bin/passport`. Cross-compile for Linux, macOS, and Windows with `make build-all`.
 
 ### Generate a Master Key
 
@@ -77,7 +80,9 @@ msg="Password: <random>"
 msg="This password will NOT be shown again."
 ```
 
-Log in at `http://localhost:8080/login` and change the admin password immediately.
+The generated config listens on `:8443` and expects TLS certificates at `/etc/passport/tls/`, which the install script creates. To run outside that layout, point `tls_cert`/`tls_key` at your own certificates or blank both to fall back to plain HTTP.
+
+Log in at `https://localhost:8443/login` and change the admin password immediately.
 
 ### Backup & Migration
 
@@ -92,7 +97,7 @@ passport -config config.yaml -export passport-export.json
 passport -config config.yaml -import passport-backup.json
 ```
 
-See the [Backup & Migration guide](docs/guide.md#18-backup--migration) for full details.
+See the [Backup & Migration guide](docs/guide.md#20-backup--migration) for full details.
 
 ### Renaming an Identity Provider
 
@@ -104,13 +109,13 @@ passport -config config.yaml -rename-idp old-slug=new-slug
 
 ## Configuration
 
-PassPort uses a minimal `config.yaml` for startup settings only. All runtime configuration (IDPs, SMTP, MFA, branding, templates, etc.) is managed through the Admin UI and stored in the database.
+PassPort uses a minimal `config.yaml` for startup settings only. All runtime configuration (IDPs, SMTP, MFA, branding, templates, etc.) is managed through the Admin UI and stored in the database. Run `passport -example-config` to print the full annotated template.
 
 ```yaml
 server:
-  addr: ":8080"
-  # tls_cert: /etc/passport/tls/cert.pem
-  # tls_key: /etc/passport/tls/key.pem
+  addr: ":8443"
+  tls_cert: /etc/passport/tls/cert.pem
+  tls_key: /etc/passport/tls/key.pem
   trust_proxy: false
   drain_timeout: 15s
 
@@ -134,9 +139,17 @@ audit:
   file_path: audit.log
   db_retention: 720h   # 30 days; set to 0 to disable DB purging
   purge_freq: 1h
+
+local_admin:
+  password_history: 14
+  min_length: 12
+  require_uppercase: true
+  require_lowercase: true
+  require_digit: true
+  require_special: true
 ```
 
-See [docs/guide.md](docs/guide.md) for comprehensive documentation.
+See [docs/guide.md](docs/guide.md) for comprehensive documentation, including the [full command-line reference](docs/guide.md#command-line-reference).
 
 ## Deployment
 

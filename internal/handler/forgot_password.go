@@ -187,10 +187,12 @@ func (h *ForgotPasswordHandler) ShowReset(w http.ResponseWriter, r *http.Request
 	}
 
 	var complexityHint string
+	var hidePolicy bool
 	if idpRecord != nil && idpRecord.ConfigJSON != "" {
 		var cfg idp.Config
 		if err := json.Unmarshal([]byte(idpRecord.ConfigJSON), &cfg); err == nil {
 			complexityHint = cfg.PasswordComplexityHint
+			hidePolicy = cfg.HideDiscoveredPasswordPolicy
 		}
 	}
 
@@ -203,12 +205,14 @@ func (h *ForgotPasswordHandler) ShowReset(w http.ResponseWriter, r *http.Request
 	}
 	// Best effort: the directory stays the authority, so an unreadable policy just
 	// leaves the form without client-side rules rather than blocking the user.
-	if provider, ok := h.registry.Get(sess.ProviderID); ok {
+	if provider, ok := h.registry.Get(sess.ProviderID); ok && !hidePolicy {
 		if reader, isReader := provider.(idp.PasswordPolicyReader); isReader {
 			if dirPolicy, err := reader.ResolvePasswordPolicy(r.Context(), sess.Username); err == nil {
 				data["PasswordPolicy"] = dirPolicy
 			} else {
-				h.logger.Warn("could not read password policy for display",
+				// Test Connection reports a missing read privilege, so logging it on
+				// every page view would only be noise.
+				h.logger.Debug("could not read password policy for display",
 					"username", sess.Username, "error", err)
 			}
 		}
@@ -303,7 +307,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 		allowedAt, ageErr := policy.PasswordChangeAllowedAt(r.Context(), userDN)
 		switch {
 		case ageErr != nil:
-			h.logger.Warn("could not evaluate minimum password age, continuing without the gate",
+			h.logger.Debug("could not evaluate minimum password age, continuing without the gate",
 				"username", sess.Username, "provider_id", sess.ProviderID, "error", ageErr)
 			h.audit.Log(r.Context(), &db.AuditEntry{
 				Timestamp:  time.Now().UTC(),
@@ -311,7 +315,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 				SourceIP:   r.RemoteAddr,
 				Action:     audit.ActionPasswordReset,
 				ProviderID: sess.ProviderID,
-				Result:     audit.ResultFailure,
+				Result:     audit.ResultWarning,
 				Details:    "Minimum password age could not be verified; reset continued",
 			})
 		case !allowedAt.IsZero():
@@ -357,7 +361,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 	if reader, ok := provider.(idp.PasswordPolicyReader); ok {
 		switch dirPolicy, polErr := reader.ResolvePasswordPolicy(r.Context(), userDN); {
 		case polErr != nil:
-			h.logger.Warn("could not read the directory's password policy",
+			h.logger.Debug("could not read the directory's password policy",
 				"username", sess.Username, "configured_length", pwLen, "error", polErr)
 		case dirPolicy.MinLength > pwLen:
 			h.logger.Info("raising temporary password length to satisfy the directory",

@@ -77,3 +77,45 @@ func TestNormalizeWebLinkURL_AcceptsHTTPAndHTTPS(t *testing.T) {
 		}
 	}
 }
+
+// TestIsReservedID guards the slugs that identify built-in pseudo-providers.
+// A real provider using one would be rendered and reordered as the built-in
+// card instead of itself.
+func TestIsReservedID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"local", true},
+		{"LOCAL", true},
+		{" local ", true},
+		{"local-ad", false},
+		{"locals", false},
+		{"corp-ad", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		if got := IsReservedID(tt.id); got != tt.want {
+			t.Errorf("IsReservedID(%q) = %v, want %v", tt.id, got, tt.want)
+		}
+	}
+}
+
+func TestValidID(t *testing.T) {
+	valid := []string{"corp-ad", "ad1", "a", "0"}
+	for _, id := range valid {
+		if !ValidID(id) {
+			t.Errorf("ValidID(%q) = false, want true", id)
+		}
+	}
+
+	// Slugs become a primary key and part of the uploaded logo filename, so
+	// path separators, traversal, and a trailing newline must all be rejected.
+	invalid := []string{"", "Corp-AD", "corp ad", "corp_ad", "../etc", "a/b", "corp-ad\n", "café"}
+	for _, id := range invalid {
+		if ValidID(id) {
+			t.Errorf("ValidID(%q) = true, want false", id)
+		}
+	}
+}

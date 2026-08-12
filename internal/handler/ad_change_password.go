@@ -46,16 +46,16 @@ func NewADChangePasswordHandler(
 	}
 }
 
-func (h *ADChangePasswordHandler) loadComplexityHint(r *http.Request, providerID string) string {
+func (h *ADChangePasswordHandler) loadConfig(r *http.Request, providerID string) *idp.Config {
 	record, err := h.store.GetIDP(r.Context(), providerID)
 	if err != nil || record == nil || record.ConfigJSON == "" {
-		return ""
+		return nil
 	}
 	var cfg idp.Config
 	if err := json.Unmarshal([]byte(record.ConfigJSON), &cfg); err != nil {
-		return ""
+		return nil
 	}
-	return cfg.PasswordComplexityHint
+	return &cfg
 }
 
 // pageData builds the render data for the change form, including the directory's
@@ -66,7 +66,13 @@ func (h *ADChangePasswordHandler) pageData(r *http.Request, sess *db.Session) ma
 	if sess == nil {
 		return data
 	}
-	data["ComplexityHint"] = h.loadComplexityHint(r, sess.ProviderID)
+	cfg := h.loadConfig(r, sess.ProviderID)
+	if cfg != nil {
+		data["ComplexityHint"] = cfg.PasswordComplexityHint
+		if cfg.HideDiscoveredPasswordPolicy {
+			return data
+		}
+	}
 
 	provider, ok := h.registry.Get(sess.ProviderID)
 	if !ok {
@@ -79,7 +85,7 @@ func (h *ADChangePasswordHandler) pageData(r *http.Request, sess *db.Session) ma
 	if dirPolicy, err := reader.ResolvePasswordPolicy(r.Context(), sess.Username); err == nil {
 		data["PasswordPolicy"] = dirPolicy
 	} else {
-		h.logger.Warn("could not read password policy for display",
+		h.logger.Debug("could not read password policy for display",
 			"username", sess.Username, "error", err)
 	}
 	return data
@@ -103,7 +109,10 @@ func (h *ADChangePasswordHandler) ChangePassword(w http.ResponseWriter, r *http.
 		return
 	}
 
-	hint := h.loadComplexityHint(r, sess.ProviderID)
+	var hint string
+	if cfg := h.loadConfig(r, sess.ProviderID); cfg != nil {
+		hint = cfg.PasswordComplexityHint
+	}
 
 	renderForm := func(msg string) {
 		h.renderer.Render(w, r, "ad_force_password_change.html", PageData{

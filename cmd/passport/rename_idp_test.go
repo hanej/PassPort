@@ -44,6 +44,9 @@ func TestParseRenameSpec(t *testing.T) {
 		{"path traversal", "old=../../etc/passwd", "", "", true},
 		{"underscore", "old=new_slug", "", "", true},
 		{"space in slug", "old=new slug", "", "", true},
+		// "local" is the built-in Local Admin card; a provider renamed onto it
+		// would be shown and arranged as Local Admin instead of itself.
+		{"reserved local admin slug", "old=local", "", "", true},
 	}
 
 	for _, tc := range tests {

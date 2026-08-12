@@ -70,6 +70,9 @@
                 </div>
             </button>
         </h2>
+        {{if .IDP.Description}}
+        <div class="text-muted small idp-description idp-accordion-desc">{{markdownSafeHTML .IDP.Description}}</div>
+        {{end}}
         <div id="collapse-{{.IDP.ID}}"
              class="accordion-collapse collapse"
              aria-labelledby="heading-{{.IDP.ID}}">
@@ -141,6 +144,7 @@
                                 </div>
                                 <div class="password-match-indicator mt-1" id="match-{{.IDP.ID}}"></div>
                             </div>
+                            {{template "password_rules" .PasswordPolicy}}
                             <div class="d-flex justify-content-end mt-3">
                                 <button type="submit" class="btn btn-primary btn-sm pw-submit-btn" disabled>
                                     <i class="bi bi-check-lg me-1"></i>Change Password

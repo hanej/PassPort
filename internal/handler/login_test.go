@@ -1461,3 +1461,71 @@ func TestLoginProvider_SelfMappingCreatedBeforeMFARedirect(t *testing.T) {
 		t.Error("expected verified_at to be set on self-mapping")
 	}
 }
+
+// TestLoginProvider_AccountStateErrors covers the directory account-state
+// branches. Each sentinel must produce its own outcome: a must-change or
+// expired password sends the user to the forced-change flow, while locked,
+// disabled, and expired accounts must re-render the login page with a message
+// telling them to contact IT rather than "invalid username or password".
+func TestLoginProvider_AccountStateErrors(t *testing.T) {
+	tests := []struct {
+		name         string
+		authErr      error
+		wantStatus   int
+		wantLocation string
+	}{
+		{"must change password", idp.ErrPasswordMustChange, http.StatusFound, "/ad-change-password"},
+		{"password expired", idp.ErrPasswordExpired, http.StatusFound, "/ad-change-password"},
+		{"account locked", idp.ErrAccountLocked, http.StatusOK, ""},
+		{"account disabled", idp.ErrAccountDisabled, http.StatusOK, ""},
+		{"account expired", idp.ErrAccountExpired, http.StatusOK, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupLoginTest(t)
+			env.registry.Register("corp-ad", &mockProvider{id: "corp-ad", authErr: tt.authErr})
+
+			form := url.Values{}
+			form.Set("provider_id", "corp-ad")
+			form.Set("username", "jdoe")
+			form.Set("password", "secret")
+			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			env.handler.Login(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if got := rec.Header().Get("Location"); got != tt.wantLocation {
+				t.Errorf("Location = %q, want %q", got, tt.wantLocation)
+			}
+		})
+	}
+}
+
+// TestLoginProvider_MustChangeSessionError covers the failure to create the
+// forced-change session: the user must get an error page, not a redirect into
+// a flow they have no session for.
+func TestLoginProvider_MustChangeSessionError(t *testing.T) {
+	env := setupLoginTest(t)
+	env.registry.Register("corp-ad", &mockProvider{id: "corp-ad", authErr: idp.ErrPasswordMustChange})
+	// Closing the DB makes the session insert fail.
+	if err := env.db.Close(); err != nil {
+		t.Fatalf("closing db: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("provider_id", "corp-ad")
+	form.Set("username", "jdoe")
+	form.Set("password", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	env.handler.Login(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}

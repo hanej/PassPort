@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,7 @@ func forgotStubRenderer(t *testing.T) *Renderer {
 	pages["forgot_password.html"] = template.Must(
 		template.New("forgot_password.html").Funcs(funcMap).Parse(`{{define "base"}}forgot {{if .Flash}}{{.Flash.message}}{{end}} {{range .Data.IDPs}}{{.ID}}{{end}}{{end}}`))
 	pages["reset_password.html"] = template.Must(
-		template.New("reset_password.html").Funcs(funcMap).Parse(`{{define "base"}}reset {{if .Flash}}{{.Flash.message}}{{end}}{{end}}`))
+		template.New("reset_password.html").Funcs(funcMap).Parse(`{{define "base"}}reset {{if .Flash}}{{.Flash.message}}{{end}}{{if .Data}} policy={{with index .Data "PasswordPolicy"}}{{.MinLength}}{{end}}|{{end}}{{end}}`))
 	pages["error.html"] = template.Must(
 		template.New("error.html").Funcs(funcMap).Parse(`{{define "base"}}error page{{end}}`))
 
@@ -885,5 +886,136 @@ func TestResetPassword_EmptyCharset(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 when charset is empty, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// mockAgePolicyProvider reports a minimum-password-age verdict. The reset flow
+// clears the directory's own age counter, so Passport has to apply the gate
+// itself or a user could cycle through password history to reuse an old one.
+type mockAgePolicyProvider struct {
+	mockProviderWithDN
+	allowedAt time.Time
+	ageErr    error
+}
+
+func (m *mockAgePolicyProvider) PasswordChangeAllowedAt(_ context.Context, _ string) (time.Time, error) {
+	return m.allowedAt, m.ageErr
+}
+
+// TestResetPassword_MinimumPasswordAge covers both minimum-age outcomes.
+func TestResetPassword_MinimumPasswordAge(t *testing.T) {
+	t.Run("blocked when a change is not yet allowed", func(t *testing.T) {
+		env := setupForgotTest(t)
+		env.createIDP(t, "corp-ad")
+		env.registry.Register("corp-ad", &mockAgePolicyProvider{
+			mockProviderWithDN: mockProviderWithDN{
+				mockProvider: mockProvider{id: "corp-ad"},
+				searchUserDN: "CN=jdoe,DC=example,DC=com",
+			},
+			allowedAt: time.Now().Add(12 * time.Hour),
+		})
+
+		cookies := env.createResetSession(t, "corp-ad", "jdoe")
+		form := url.Values{}
+		form.Set("new_password", "NewPass1!")
+		form.Set("confirm_password", "NewPass1!")
+
+		rec := env.serveWithSession(t, env.handler.ResetPassword, http.MethodPost, "/reset-password", cookies, form.Encode())
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("expected redirect, got %d", rec.Code)
+		}
+		// Back to the form, not on to /login: the reset must not have happened.
+		if loc := rec.Header().Get("Location"); loc != "/reset-password" {
+			t.Errorf("Location = %q, want /reset-password", loc)
+		}
+	})
+
+	t.Run("unreadable policy does not block the reset", func(t *testing.T) {
+		env := setupForgotTest(t)
+		env.createIDP(t, "corp-ad")
+		env.registry.Register("corp-ad", &mockAgePolicyProvider{
+			mockProviderWithDN: mockProviderWithDN{
+				mockProvider: mockProvider{id: "corp-ad"},
+				searchUserDN: "CN=jdoe,DC=example,DC=com",
+			},
+			ageErr: errors.New("ldap: cannot read pwdLastSet"),
+		})
+
+		cookies := env.createResetSession(t, "corp-ad", "jdoe")
+		form := url.Values{}
+		form.Set("new_password", "NewPass1!")
+		form.Set("confirm_password", "NewPass1!")
+
+		rec := env.serveWithSession(t, env.handler.ResetPassword, http.MethodPost, "/reset-password", cookies, form.Encode())
+
+		if loc := rec.Header().Get("Location"); loc != "/login" {
+			t.Errorf("Location = %q, want /login (a transient policy read must not block the reset)", loc)
+		}
+	})
+}
+
+// createIDPWithConfig stores an AD provider with an arbitrary config JSON.
+func (env *forgotTestEnv) createIDPWithConfig(t *testing.T, id, configJSON string) {
+	t.Helper()
+	rec := &db.IdentityProviderRecord{
+		ID:           id,
+		FriendlyName: id + " provider",
+		ProviderType: "ad",
+		Enabled:      true,
+		ConfigJSON:   configJSON,
+	}
+	if err := env.db.CreateIDP(context.Background(), rec); err != nil {
+		t.Fatalf("creating IDP %q: %v", id, err)
+	}
+}
+
+func TestShowReset_PasswordPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		configJSON string
+		policyErr  error
+		wantPolicy string
+	}{
+		{
+			name:       "shown by default",
+			configJSON: `{}`,
+			wantPolicy: "policy=14|",
+		},
+		{
+			name:       "suppressed by the IDP setting",
+			configJSON: `{"hide_discovered_password_policy":true}`,
+			wantPolicy: "policy=|",
+		},
+		{
+			// The directory stays the authority, so an unreadable policy must not
+			// stop the user resetting their password.
+			name:       "unreadable policy still renders the form",
+			configJSON: `{}`,
+			policyErr:  errors.New("insufficient access"),
+			wantPolicy: "policy=|",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupForgotTest(t)
+			env.createIDPWithConfig(t, "corp-ad", tt.configJSON)
+			env.registry.Register("corp-ad", &mockPolicyProvider{
+				mockProvider: &mockProvider{id: "corp-ad", providerType: idp.ProviderTypeAD},
+				policy:       idp.PasswordPolicy{MinLength: 14, ComplexityEnabled: true},
+				policyErr:    tt.policyErr,
+			})
+
+			cookies := env.createResetSession(t, "corp-ad", "jdoe")
+			rec := env.serveWithSession(t, env.handler.ShowReset, http.MethodGet, "/reset-password", cookies, "")
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+			}
+			if body := rec.Body.String(); !strings.Contains(body, tt.wantPolicy) {
+				t.Errorf("expected %q in body, got: %s", tt.wantPolicy, body)
+			}
+		})
 	}
 }

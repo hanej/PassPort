@@ -133,6 +133,11 @@ func parseRenameSpec(spec string) (oldID, newID string, err error) {
 	if !idp.ValidID(newID) {
 		return "", "", fmt.Errorf("invalid new slug %q: use lowercase letters, numbers, and hyphens", newID)
 	}
+	// "local" is the built-in Local Admin card, which has no identity_providers
+	// row; a provider renamed onto it would be shown and arranged as Local Admin.
+	if idp.IsReservedID(newID) {
+		return "", "", fmt.Errorf("slug %q is reserved for the built-in Local Admin card", newID)
+	}
 	if oldID == newID {
 		return "", "", fmt.Errorf("old and new slugs are identical")
 	}

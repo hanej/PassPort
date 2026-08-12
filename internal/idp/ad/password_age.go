@@ -166,6 +166,12 @@ func (c *Connector) ResolvePasswordPolicy(ctx context.Context, user string) (idp
 	if policy.ComplexityEnabled, err = c.complexityEnabled(conn, psoDN); err != nil {
 		return policy, err
 	}
+	if policy.ComplexityEnabled {
+		// MS-ADTS 3.1.1.13.1 fixes both halves of the rule: three of the character
+		// categories, and no account-name or display-name token in the password.
+		policy.MinCategories = 3
+		policy.ForbidsUserName = true
+	}
 
 	c.logger.Debug("resolved password policy",
 		"user_dn", userDN, "minimum_length", policy.MinLength,

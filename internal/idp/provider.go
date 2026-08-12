@@ -60,6 +60,18 @@ func ValidID(s string) bool {
 	return idPattern.MatchString(s)
 }
 
+// reservedIDs are slugs claimed by built-in pseudo-providers that have no
+// identity_providers row. Must stay in sync with db.LocalAdminIDPID.
+var reservedIDs = map[string]bool{"local": true}
+
+// IsReservedID reports whether s is claimed by a built-in pseudo-provider. A
+// real provider must never use one: the login page and the arrangement store
+// both branch on the slug, so such a provider would be rendered and reordered
+// as the built-in card instead of itself.
+func IsReservedID(s string) bool {
+	return reservedIDs[strings.ToLower(strings.TrimSpace(s))]
+}
+
 // NormalizeWebLinkURL validates a weblink target URL and returns it, or an
 // empty string if it is not an absolute http(s) URL. This blocks scheme-based
 // injection such as javascript: or data: URLs.
@@ -144,6 +156,14 @@ type PasswordAgePolicy interface {
 type PasswordPolicy struct {
 	MinLength         int
 	ComplexityEnabled bool
+	// MinCategories is how many of uppercase, lowercase, digit and symbol the
+	// password must draw on. Active Directory fixes this at three; FreeIPA makes
+	// it configurable per policy. Zero means the rule does not apply.
+	MinCategories int
+	// ForbidsUserName reports whether the directory rejects a password containing
+	// the account or display name. Active Directory folds this into its complexity
+	// flag; FreeIPA exposes it as a separate switch.
+	ForbidsUserName bool
 	// SamAccountName and DisplayName support Active Directory's complexity rule
 	// that a password may contain neither the account name nor a token of the
 	// display name.
@@ -157,6 +177,14 @@ type PasswordPolicy struct {
 // back to their configured behaviour rather than blocking the user.
 type PasswordPolicyReader interface {
 	ResolvePasswordPolicy(ctx context.Context, user string) (PasswordPolicy, error)
+}
+
+// DirectoryDiagnoser is implemented by connectors that can report problems which
+// degrade a feature without breaking the connection, such as a service account
+// missing an optional privilege. These surface on Test Connection so an admin
+// finds them once, rather than in the logs of every user request.
+type DirectoryDiagnoser interface {
+	Diagnose(ctx context.Context) []string
 }
 
 // LDAPConnector abstracts LDAP connection creation for testability.
@@ -183,8 +211,12 @@ type Config struct {
 	Timeout                int    `json:"timeout"`         // seconds, default 10
 	TLSSkipVerify          bool   `json:"tls_skip_verify"` // skip TLS certificate verification
 	PasswordComplexityHint string `json:"password_complexity_hint"`
-	SendNotification       bool   `json:"send_notification"`
-	NotificationEmailAttr  string `json:"notification_email_attr"`
+	// HideDiscoveredPasswordPolicy suppresses the rule checklist read from the
+	// directory. Stored inverted so existing IDPs, whose config predates the
+	// field, keep showing it.
+	HideDiscoveredPasswordPolicy bool   `json:"hide_discovered_password_policy,omitempty"`
+	SendNotification             bool   `json:"send_notification"`
+	NotificationEmailAttr        string `json:"notification_email_attr"`
 	// Random password policy for MFA reset. When PasswordLength is 0, defaults are used.
 	PasswordAllowUppercase    bool   `json:"password_allow_uppercase"`
 	PasswordAllowLowercase    bool   `json:"password_allow_lowercase"`
