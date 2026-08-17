@@ -18,6 +18,7 @@ PassPort is a single-binary Go web application that lets end users change and re
 - **Unified dashboard** -- users see all linked directory accounts in one place, organised into collapsible provider groups
 - **Automatic password policy detection** -- reads the effective policy from AD or FreeIPA and shows users a live rule checklist as they type
 - **Forgot-password flow** -- self-service reset with optional Duo MFA verification
+- **Optional MFA on login** -- require a second factor for directory logins, not just resets
 - **Password expiration notifications** -- cron-scheduled emails with per-IDP templates
 - **Automatic account correlation** -- links user accounts across IDPs using configurable attribute rules
 - **Web Link providers** -- surface external self-service portals as cards alongside real directories
@@ -28,8 +29,10 @@ PassPort is a single-binary Go web application that lets end users change and re
 - **Audit logging** -- dual output to append-only JSON file and database with retention controls
 - **Admin groups** -- map LDAP groups to the admin role
 - **Backup & migration** -- CLI export/import with encrypted or plaintext secrets, web UI with section selection
-- **Single binary** -- embedded SQLite, embedded static assets, zero external dependencies at runtime
+- **Single binary** -- embedded SQLite, embedded templates and static assets, no runtime services beyond your directory and SMTP server
 - **Security hardened** -- AES-256-GCM encryption, CSRF protection, rate limiting, secure cookies, systemd hardening
+
+> **Browser note:** the UI loads Bootstrap, Bootstrap Icons, and TinyMCE from `cdn.jsdelivr.net`. Browsers on an air-gapped network will render the pages unstyled.
 
 ## Quick Start
 
@@ -80,7 +83,7 @@ msg="Password: <random>"
 msg="This password will NOT be shown again."
 ```
 
-The generated config listens on `:8443` and expects TLS certificates at `/etc/passport/tls/`, which the install script creates. To run outside that layout, point `tls_cert`/`tls_key` at your own certificates or blank both to fall back to plain HTTP.
+The generated config listens on `:8443` and expects TLS certificates at `/etc/passport/tls/`, which the RPM/DEB package's `postinstall` script creates. To run outside that layout, point `tls_cert`/`tls_key` at your own certificates or blank both to fall back to plain HTTP.
 
 Log in at `https://localhost:8443/login` and change the admin password immediately.
 
@@ -159,18 +162,17 @@ See [docs/guide.md](docs/guide.md) for comprehensive documentation, including th
 # Build the binary
 make build
 
-# Run the install script as root
+# Run the install script as root (installs the unit, then enables and starts it)
 sudo bash deploy/install.sh
-
-# Start the service
-sudo systemctl enable --now passport
 ```
 
 The install script creates:
 - System user `passport` (no login shell)
-- `/opt/passport/` -- binary, config, database, uploads
+- `/opt/passport/` -- binary, config, database, uploads, logs
 - `/etc/passport/key` -- master encryption key
 - Systemd unit with security hardening (read-only root, private tmp, no new privileges)
+
+It does **not** create TLS certificates. Either supply your own at `/etc/passport/tls/` or blank `tls_cert`/`tls_key` in `/opt/passport/config.yaml` before the first start. The RPM/DEB packages generate a self-signed certificate for you.
 
 ### Reverse Proxy
 

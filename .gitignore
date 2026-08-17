@@ -37,3 +37,6 @@ uploads/
 .vscode/
 *.swp
 *.swo
+
+# Local AI assistant notes (not part of the project)
+CLAUDE.md

@@ -15,6 +15,11 @@ import (
 	"github.com/hanej/passport/internal/db"
 )
 
+// maxLogoUploadBytes caps the branding form body. Without it ParseMultipartForm
+// only bounds how much is buffered in memory, so an oversized logo would still
+// be streamed to disk in full.
+const maxLogoUploadBytes = 5 << 20
+
 // AdminBrandingHandler handles branding configuration in the admin UI.
 type AdminBrandingHandler struct {
 	store      db.Store
@@ -73,8 +78,9 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
 
 	// Parse multipart form (max 5MB for logo upload).
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		h.renderer.RenderError(w, r, http.StatusBadRequest, "Invalid form data")
+	r.Body = http.MaxBytesReader(w, r.Body, maxLogoUploadBytes)
+	if err := r.ParseMultipartForm(maxLogoUploadBytes); err != nil {
+		h.renderer.RenderError(w, r, http.StatusBadRequest, "Invalid form data, or the logo exceeds the 5 MB limit")
 		return
 	}
 
@@ -168,7 +174,7 @@ func (h *AdminBrandingHandler) Save(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "branding_updated",
+		Action:   audit.ActionBrandingUpdate,
 		Result:   "success",
 		Details:  fmt.Sprintf("Branding updated: title=%s, logo=%s", cfg.AppTitle, cfg.LogoURL),
 	})

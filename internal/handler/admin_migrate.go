@@ -135,7 +135,7 @@ func (h *AdminMigrateHandler) Export(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(ctx, &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "config_exported",
+		Action:   audit.ActionConfigExport,
 		Result:   "success",
 		Details:  fmt.Sprintf("Configuration exported: %d IDPs, %d admins, %d mappings", len(data.IdentityProviders), len(data.LocalAdmins), len(data.UserMappings)),
 	})
@@ -279,7 +279,7 @@ func (h *AdminMigrateHandler) Import(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(ctx, &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "config_imported",
+		Action:   audit.ActionConfigImport,
 		Result:   category,
 		Details: fmt.Sprintf("Import: %d admins, %d IDPs, %d provider groups, %d groups, %d mappings, SMTP=%v, %d MFA, branding=%v, %d templates, %d uploads, %d errors",
 			result.LocalAdmins, result.IDPs, result.IDPGroups, result.AdminGroups, result.UserMappings,

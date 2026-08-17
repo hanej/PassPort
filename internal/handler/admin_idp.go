@@ -1192,7 +1192,7 @@ func (h *AdminIDPHandler) BrowseChildren(w http.ResponseWriter, r *http.Request)
 }
 
 // SearchDirectory searches the LDAP directory for entries matching an attribute filter.
-// GET /admin/idp/{id}/search?attr=sAMAccountName&value=jhane
+// GET /admin/idp/{id}/search?attr=sAMAccountName&value=jdoe
 func (h *AdminIDPHandler) SearchDirectory(w http.ResponseWriter, r *http.Request) {
 	idpID := chi.URLParam(r, "id")
 	attr := r.URL.Query().Get("attr")

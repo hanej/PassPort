@@ -229,8 +229,8 @@ func TestIDPStatusOffline(t *testing.T) {
 	if body["status"] != "offline" {
 		t.Errorf("expected status offline, got %s", body["status"])
 	}
-	if body["error"] != "connection refused" {
-		t.Errorf("expected error 'connection refused', got %s", body["error"])
+	if body["error"] != "connection failed" {
+		t.Errorf("expected generic error 'connection failed', got %s", body["error"])
 	}
 }
 
@@ -266,6 +266,56 @@ func TestIDPStatus_EmptyID(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+}
+
+// TestPasswordChangeMessage verifies that provider errors are mapped to
+// user-safe messages and that no raw directory detail survives the mapping.
+func TestPasswordChangeMessage(t *testing.T) {
+	leaky := "LDAP Result Code 49: bind failed for CN=svc,OU=Svc,DC=corp,DC=example,DC=com via dc01.corp.example.com:636"
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "policy",
+			err:  fmt.Errorf("%w: %s", idp.ErrPasswordPolicy, leaky),
+			want: "the new password does not meet your organization's complexity, history, or minimum age requirements.",
+		},
+		{
+			name: "wrong current password",
+			err:  errors.New("current password is incorrect"),
+			want: "current password is incorrect.",
+		},
+		{
+			name: "locked",
+			err:  fmt.Errorf("%w: %s", idp.ErrAccountLocked, leaky),
+			want: "your account is locked. Please contact your IT administrator.",
+		},
+		{
+			name: "disabled",
+			err:  fmt.Errorf("%w: %s", idp.ErrAccountDisabled, leaky),
+			want: "your account is disabled. Please contact your IT administrator.",
+		},
+		{
+			name: "unknown",
+			err:  errors.New(leaky),
+			want: "please try again or contact your administrator.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := passwordChangeMessage(tc.err)
+			if got != tc.want {
+				t.Errorf("passwordChangeMessage() = %q, want %q", got, tc.want)
+			}
+			if strings.Contains(got, "DC=corp") || strings.Contains(got, "dc01") {
+				t.Errorf("directory detail leaked into user message: %q", got)
+			}
+		})
 	}
 }
 

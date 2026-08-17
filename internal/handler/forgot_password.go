@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -421,13 +420,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 			Result:     audit.ResultFailure,
 			Details:    fmt.Sprintf("Password reset failed: %v", err),
 		})
-		if errors.Is(err, idp.ErrPasswordPolicy) {
-			h.sessions.SetFlash(w, r, "error",
-				"Password reset failed: the new password does not meet your organization's complexity, history, or minimum age requirements.")
-		} else {
-			errMsg := sanitizeDN(err.Error(), userDN, sess.Username)
-			h.sessions.SetFlash(w, r, "error", "Password reset failed: "+errMsg)
-		}
+		h.sessions.SetFlash(w, r, "error", "Password reset failed: "+passwordChangeMessage(err))
 		http.Redirect(w, r, "/reset-password", http.StatusFound)
 		return
 	}

@@ -31,7 +31,9 @@ func (h *HealthHandler) Liveness(w http.ResponseWriter, r *http.Request) {
 }
 
 // Readiness verifies the database is reachable and all migrations have been
-// applied. It returns 200 when ready, or 503 with an error description.
+// applied. It returns 200 when ready, or 503 with a coarse reason. The reason
+// is deliberately vague: this endpoint is unauthenticated and driver errors
+// embed the database file path.
 func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -42,7 +44,7 @@ func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
-			"error":  err.Error(),
+			"error":  "database unreachable",
 		})
 		return
 	}
@@ -53,7 +55,7 @@ func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
-			"error":  err.Error(),
+			"error":  "migration state unavailable",
 		})
 		return
 	}

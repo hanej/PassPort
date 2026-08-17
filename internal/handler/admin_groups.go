@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -253,16 +252,6 @@ func (h *AdminGroupsHandler) Members(w http.ResponseWriter, r *http.Request) {
 		"members": members,
 		"count":   len(members),
 	})
-}
-
-// sanitizeDN strips full LDAP DNs from an error message, replacing them with
-// a short label (typically the username). This prevents leaking internal directory
-// structure to end users in flash messages.
-func sanitizeDN(errMsg, dn, label string) string {
-	if dn == "" {
-		return errMsg
-	}
-	return strings.ReplaceAll(errMsg, dn, label)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -497,7 +497,11 @@ func TestFilterOptions(t *testing.T) {
 
 	// The viewer filters on an exact action match, so an option whose value is
 	// not a real action silently returns nothing.
-	for _, want := range []string{ActionLogin, ActionLinkAuto, ActionLinkManual, ActionExpiredNotification} {
+	for _, want := range []string{
+		ActionLogin, ActionLinkAuto, ActionLinkManual, ActionExpiredNotification,
+		ActionBrandingUpdate, ActionConfigExport, ActionConfigImport,
+		ActionIDPGroupCreate, ActionIDPGroupUpdate, ActionIDPGroupDelete, ActionIDPGroupsArrange,
+	} {
 		if !seen[want] {
 			t.Errorf("action %q is recorded but cannot be filtered", want)
 		}

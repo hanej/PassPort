@@ -310,49 +310,6 @@ func TestAdminGroupsMembers_GroupNotFound(t *testing.T) {
 	}
 }
 
-// TestSanitizeDN verifies that sanitizeDN replaces the full DN with a label.
-func TestSanitizeDN(t *testing.T) {
-	tests := []struct {
-		errMsg string
-		dn     string
-		label  string
-		want   string
-	}{
-		{
-			errMsg: "failed for CN=jdoe,OU=Users,DC=example,DC=com: timeout",
-			dn:     "CN=jdoe,OU=Users,DC=example,DC=com",
-			label:  "jdoe",
-			want:   "failed for jdoe: timeout",
-		},
-		{
-			errMsg: "no error to sanitize",
-			dn:     "",
-			label:  "nobody",
-			want:   "no error to sanitize",
-		},
-		{
-			errMsg: "dn appears twice: CN=x,DC=y and CN=x,DC=y",
-			dn:     "CN=x,DC=y",
-			label:  "user",
-			want:   "dn appears twice: user and user",
-		},
-		{
-			errMsg: "no dn present",
-			dn:     "CN=not,DC=here",
-			label:  "someone",
-			want:   "no dn present",
-		},
-	}
-
-	for _, tc := range tests {
-		got := sanitizeDN(tc.errMsg, tc.dn, tc.label)
-		if got != tc.want {
-			t.Errorf("sanitizeDN(%q, %q, %q) = %q, want %q",
-				tc.errMsg, tc.dn, tc.label, got, tc.want)
-		}
-	}
-}
-
 // TestWriteJSON verifies that writeJSON writes valid JSON with the correct
 // Content-Type and status code.
 func TestWriteJSON(t *testing.T) {

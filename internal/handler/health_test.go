@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hanej/passport/internal/db"
@@ -101,8 +102,11 @@ func TestReadiness_DBUnreachable(t *testing.T) {
 	if body["status"] != "not ready" {
 		t.Fatalf("expected status 'not ready', got %s", body["status"])
 	}
-	if body["error"] == "" {
-		t.Fatal("expected error field to be non-empty")
+	if body["error"] != "database unreachable" {
+		t.Fatalf("expected coarse reason, got %s", body["error"])
+	}
+	if strings.Contains(body["error"], ".db") {
+		t.Fatal("database path leaked on the unauthenticated readiness probe")
 	}
 }
 

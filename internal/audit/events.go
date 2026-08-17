@@ -36,6 +36,13 @@ const (
 	ActionExpirationConfigUpdate = "expiration_config_update"
 	ActionReportConfigUpdate     = "report_config_update"
 	ActionReportSent             = "report_sent"
+	ActionBrandingUpdate         = "branding_updated"
+	ActionIDPGroupCreate         = "idp_group_created"
+	ActionIDPGroupUpdate         = "idp_group_updated"
+	ActionIDPGroupDelete         = "idp_group_deleted"
+	ActionIDPGroupsArrange       = "idp_groups_arranged"
+	ActionConfigExport           = "config_exported"
+	ActionConfigImport           = "config_imported"
 
 	ResultSuccess = "success"
 	ResultFailure = "failure"
@@ -77,6 +84,10 @@ func FilterOptions() []FilterOption {
 		{"Identity Providers", ActionIDPDelete, "Provider Deleted"},
 		{"Identity Providers", ActionIDPToggle, "Provider Enabled/Disabled"},
 		{"Identity Providers", ActionIDPTestConnection, "Connection Test"},
+		{"Identity Providers", ActionIDPGroupCreate, "Provider Group Created"},
+		{"Identity Providers", ActionIDPGroupUpdate, "Provider Group Updated"},
+		{"Identity Providers", ActionIDPGroupDelete, "Provider Group Deleted"},
+		{"Identity Providers", ActionIDPGroupsArrange, "Provider Groups Arranged"},
 
 		{"MFA Providers", ActionMFACreate, "MFA Provider Created"},
 		{"MFA Providers", ActionMFAUpdate, "MFA Provider Updated"},
@@ -89,6 +100,9 @@ func FilterOptions() []FilterOption {
 		{"Administration", ActionSMTPTest, "Test Email Sent"},
 		{"Administration", ActionEmailTemplateUpdate, "Email Template Updated"},
 		{"Administration", ActionEmailTemplateReset, "Email Template Reset"},
+		{"Administration", ActionBrandingUpdate, "Branding Updated"},
+		{"Administration", ActionConfigExport, "Configuration Exported"},
+		{"Administration", ActionConfigImport, "Configuration Imported"},
 
 		{"Scheduled Jobs", ActionExpirationNotification, "Expiration Notice Sent"},
 		{"Scheduled Jobs", ActionExpiredNotification, "Expired Notice Sent"},

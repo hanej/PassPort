@@ -38,6 +38,8 @@ Comprehensive documentation for PassPort, a self-service password management too
 - One or more LDAP directories (Active Directory or FreeIPA)
 - A modern web browser for the admin UI
 
+> **The browser needs access to `cdn.jsdelivr.net`.** The server binary is self-contained, but the pages load Bootstrap 5.3.3, Bootstrap Icons 1.11.3, and (on the email template editor) TinyMCE 6 from jsDelivr. On a network where browsers cannot reach that CDN the UI still functions but renders unstyled, without icons, and the template editor falls back to a plain textarea. The [group icon picker](#provider-groups) also reads its icon list from that stylesheet and falls back to a small curated set when it is unreachable.
+
 ### Building
 
 ```bash
@@ -126,6 +128,8 @@ Runtime settings are stored in the SQLite database and take effect immediately.
 
 ### Full config.yaml Reference
 
+This is the file `passport -example-config` prints, which is also what the RPM/DEB packages install at `/opt/passport/config.yaml`. The config PassPort writes for itself when none exists is the same except that file logging is disabled (`logging.file.path: ""`) and the audit log goes to `audit.log` in the working directory rather than `logs/audit.log`.
+
 ```yaml
 server:
   # Listen address.
@@ -159,7 +163,8 @@ logging:
 
   file:
     # File path for log output. Leave empty to disable file logging.
-    path: ""
+    # Relative paths resolve against the working directory (/opt/passport).
+    path: "logs/passport.log"
     format: json
     level: debug
 
@@ -172,7 +177,7 @@ session:
 audit:
   # Path to the append-only JSON audit log file. This file is never automatically
   # purged and serves as the permanent audit record.
-  file_path: audit.log
+  file_path: "logs/audit.log"
 
   # How long to retain audit entries in the database (for the admin UI viewer).
   # Older entries are automatically purged. Set to 0 to disable DB purging.
@@ -385,8 +390,8 @@ Use the `-rename-idp` flag instead. It runs offline against the database and exi
 
 ```sh
 systemctl stop passport
-cp /var/lib/passport/passport.db{,.pre-rename}
-sudo -u passport passport -config /etc/passport/config.yaml -rename-idp old-slug=new-slug
+cp /opt/passport/passport.db{,.pre-rename}
+sudo -u passport /opt/passport/bin/passport -config /opt/passport/config.yaml -rename-idp old-slug=new-slug
 systemctl start passport
 ```
 
@@ -507,9 +512,11 @@ A correlation rule defines how PassPort automatically links a user who logs in v
 
 - **Source Canonical Attribute** -- the canonical attribute name to read from the authenticating IDP
 - **Target Directory Attribute** -- the LDAP attribute to search on the target IDP (resolved automatically from the target's attribute mappings, or set explicitly as a fallback)
-- **Match Mode** -- matching strategy (exact match)
+- **Match Mode** -- **Exact** or **Case Insensitive**. The value is stored and logged, but matching is currently delegated to the target directory's own attribute equality rules for both settings, so it has no effect today. Leave it on **Exact**.
 
 Example: If a user logs in via AD where `employeeID=12345`, and FreeIPA has `employeeNumber=12345` mapped to the same canonical name `employee_id`, PassPort will automatically link the accounts.
+
+If the search returns **more than one** account on the target directory, no link is created — PassPort cannot tell which account is the user's. The user is shown a warning on their dashboard asking them to link that provider manually, and the warning clears as soon as they do.
 
 ### Test Connection
 
@@ -599,6 +606,8 @@ The dashboard shows all enabled directory IDPs and the user's link status for ea
 
 Any configured **Web Link** providers are listed separately as link cards, which open the target site in a new tab. They have no link status because there is no directory account to correlate.
 
+If automatic correlation found **several** possible accounts on a directory, the dashboard shows a warning for that provider asking the user to link it manually — see [Correlation Rules](#correlation-rules). Linking the account clears the warning.
+
 ### Changing Passwords
 
 From the dashboard, users can change their password on any linked IDP:
@@ -608,7 +617,7 @@ From the dashboard, users can change their password on any linked IDP:
 3. Enter and confirm the new password
 4. The IDP's password complexity hint is displayed if configured, along with a live checklist of the rules read from the directory itself — see [Automatic Password Policy Detection](#automatic-password-policy-detection)
 
-If an MFA provider is enabled, password changes may require MFA verification first.
+Changing a password from the dashboard requires the current password, so it is not gated by MFA on its own. If [MFA on Login](#mfa-on-login) is enabled the user has already completed MFA to reach the dashboard.
 
 Password changes are rate limited per account — see [Security](#16-security).
 
@@ -727,6 +736,15 @@ Each IDP can be assigned its own MFA provider under **Admin > Identity Providers
 
 When MFA is active, it is required for the forgot-password flow before a password reset is permitted.
 
+### MFA on Login
+
+By default MFA only guards the forgot-password flow. The **MFA on Login** card at the top of **Admin > MFA** extends it to ordinary logins: after a user authenticates against their directory, they are sent to the MFA step and cannot reach the dashboard until it succeeds.
+
+- The setting is global — one **Enable**/**Disable** button — but it only applies where a provider resolves for the IDP, using the same order as above. A user logging into an IDP with no MFA provider and no global default is let straight through.
+- **Local admin accounts are not affected.** They never have an IDP-assigned MFA provider, so the built-in `admin` login keeps working if the MFA service is misconfigured.
+- **It fails open.** If the provider's health check fails, the credential cannot be decrypted, or the setting cannot be read, the login is allowed without MFA and the reason is logged at `WARN`. This keeps a Duo outage from locking everyone out; if you need fail-closed behaviour, disable the affected IDP instead.
+- Each attempt is recorded in the audit log as `mfa_verify`.
+
 ---
 
 ### Duo Security
@@ -843,7 +861,9 @@ Examples:
 
 ### How Expiration Detection Works
 
-**Active Directory:** PassPort reads the domain's `maxPwdAge` policy from the root DSE, then searches for users whose `pwdLastSet` attribute indicates their password will expire within the configured threshold.
+**Active Directory:** PassPort reads the `maxPwdAge` attribute from the domain root object (the **Base DN** configured for the IDP), then searches for users whose `pwdLastSet` attribute indicates their password will expire within the configured threshold.
+
+> **Note:** the Base DN must be the domain root (for example `DC=corp,DC=example,DC=com`) for this lookup to succeed. If it points at a sub-container, or if the domain policy has `maxPwdAge` set to "never expires", the scan fails with a `maxPwdAge` error and no notifications are sent. Fine-grained password policies (PSOs) are not consulted here -- every account is evaluated against the domain-wide `maxPwdAge`, unlike the policy hints shown on the user dashboard, which do resolve PSOs.
 
 **FreeIPA:** PassPort reads the `krbPasswordExpiration` attribute to determine when each user's password expires.
 
@@ -1057,20 +1077,36 @@ PassPort uses HTML email templates for all outbound messages. Templates are edit
 
 ### Template Types
 
-| Type | Used For |
-|------|----------|
-| `password_expiration` | Password expiration warning emails |
-| `password_expiration:<idp_id>` | Per-IDP override for expiration warnings |
-| `password_expired` | Notices sent after a password has already expired |
-| `password_expired:<idp_id>` | Per-IDP override for expired notices |
-| `expiration_report` | Soon-to-Expire Passwords report emails |
-| `expiration_report:<idp_id>` | Per-IDP override for the soon-to-expire report |
-| `expired_accounts_report` | Expired Accounts report emails |
-| `expired_accounts_report:<idp_id>` | Per-IDP override for the expired accounts report |
+| Type | Used For | Per-IDP Override |
+|------|----------|------------------|
+| `smtp_test` | The message sent by **Send Test Email** on the SMTP page | No |
+| `password_changed` | Confirmation sent after a user changes their own password (dashboard or forced AD change) | No |
+| `password_reset` | Confirmation sent after a self-service forgot-password reset | No |
+| `password_expiration` | Password expiration warning emails | Yes |
+| `password_expiration:<idp_id>` | Per-IDP override for expiration warnings | |
+| `password_expired` | Notices sent after a password has already expired | Yes |
+| `password_expired:<idp_id>` | Per-IDP override for expired notices | |
+| `expiration_report` | Soon-to-Expire Passwords report emails | Yes |
+| `expiration_report:<idp_id>` | Per-IDP override for the soon-to-expire report | |
+| `expired_accounts_report` | Expired Accounts report emails | Yes |
+| `expired_accounts_report:<idp_id>` | Per-IDP override for the expired accounts report | |
+
+The confirmation emails (`password_changed`, `password_reset`) are sent to the address resolved from the IDP's `email` [attribute mapping](#attribute-mappings). If SMTP is disabled, no mapping exists, or the send fails, the failure is logged but the password change itself still succeeds.
 
 ### Available Template Variables
 
 Variables are inserted using Go template syntax: `{{.VariableName}}`.
+
+**Password Change and Reset Confirmations:**
+
+| Variable | Description | `password_changed` | `password_reset` |
+|----------|-------------|--------------------|------------------|
+| `{{.Username}}` | User's login name | Yes | Yes |
+| `{{.ProviderName}}` | Friendly name of the IDP | Yes | Yes |
+| `{{.Timestamp}}` | When the change happened | Yes | Yes |
+| `{{.IPAddress}}` | Client IP the change came from | Yes | — |
+
+**SMTP Test (`smtp_test`):** `{{.Timestamp}}` only.
 
 **Password Expiration Templates:**
 
@@ -1117,6 +1153,8 @@ Use the **Preview** button to render the template with sample data. This shows e
 ### Per-IDP Overrides
 
 To customize an email for a specific IDP, create a template with the IDP-specific type suffix (e.g., `password_expiration:<idp_id>`, `expiration_report:<idp_id>`, `expired_accounts_report:<idp_id>`). When the job runs for that IDP, the IDP-specific template takes precedence over the global one.
+
+Only the four scheduled-job templates support overrides. `smtp_test`, `password_changed`, and `password_reset` are global.
 
 ### Resetting to Defaults
 
@@ -1229,13 +1267,20 @@ PassPort maintains a dual audit log for all security-relevant events.
 | `expiration_config_update` | Expiration config changed |
 | `report_config_update` | Report configuration changed |
 | `report_sent` | Report email sent to recipients |
+| `branding_updated` | Branding settings saved |
+| `idp_group_created` | Provider group created |
+| `idp_group_updated` | Provider group edited |
+| `idp_group_deleted` | Provider group deleted |
+| `idp_groups_arranged` | Provider arrangement saved |
+| `config_exported` | Configuration exported from the Migration page |
+| `config_imported` | Configuration imported from the Migration page |
 
 ### Filtering
 
 The admin audit log viewer at **Admin > Audit** supports filtering by:
 
 - Username
-- Action type (grouped by area; the list is generated from the actions above, so it always matches what can be recorded)
+- Action type (grouped by area, generated from the action constants listed above)
 - Result (success/warning/failure)
 - Provider
 - Date range (start/end)
@@ -1364,7 +1409,7 @@ The two password-change endpoints bind to the directory with the user's *current
 
 ### TLS
 
-PassPort defaults to TLS-only (`tls_cert` and `tls_key` are pre-configured). A self-signed RSA-4096 certificate valid for 10 years is generated automatically at install time by the `postinstall` script:
+PassPort defaults to TLS-only (`tls_cert` and `tls_key` are pre-configured). A self-signed RSA-4096 certificate valid for 10 years is generated automatically **by the RPM/DEB `postinstall` script** — `deploy/install.sh` does not generate one:
 
 ```
 /etc/passport/tls/cert.pem   # Certificate (world-readable)
@@ -1417,8 +1462,8 @@ Leave this `false` (the default) when PassPort terminates TLS directly. Only ena
   passport.db            # SQLite database
   passport.db-shm        # SQLite shared memory (WAL mode)
   passport.db-wal        # SQLite write-ahead log
-  audit.log              # Append-only audit log
   uploads/               # Uploaded logos and images
+  logs/                  # passport.log and audit.log (per the packaged config)
 
 /etc/passport/
   key                    # Master encryption key (600 permissions)
@@ -1428,9 +1473,18 @@ Leave this `false` (the default) when PassPort terminates TLS directly. Only ena
     key.pem              # TLS private key  (640, passport:passport)
 ```
 
+### Packages
+
+The RPM and DEB packages built by `make rpm-amd64` / `make rpm-arm64` lay out the same directories and run `deploy/scripts/postinstall.sh`, which additionally:
+
+- generates the master key at `/etc/passport/key` if absent (base64, mode 600)
+- generates the self-signed TLS certificate under `/etc/passport/tls/` if absent
+- installs the logrotate config at `/etc/logrotate.d/passport` for `/opt/passport/logs/*.log`
+- enables and restarts the service
+
 ### Install Script
 
-The provided install script (`deploy/install.sh`) automates setup:
+The provided install script (`deploy/install.sh`) automates a from-source setup:
 
 ```bash
 sudo bash deploy/install.sh
@@ -1438,13 +1492,14 @@ sudo bash deploy/install.sh
 
 It performs:
 1. Creates a `passport` system user (no login shell, no home directory)
-2. Creates `/opt/passport/bin/`, `/opt/passport/uploads/`, `/etc/passport/tls/`
-3. Copies the binary to `/opt/passport/bin/passport`
-4. Generates a 32-byte master key at `/etc/passport/key` (if not present)
+2. Creates `/opt/passport/bin/`, `/opt/passport/uploads/`, `/opt/passport/logs/`, and `/etc/passport/`
+3. Copies `bin/passport` (run `make build` first) to `/opt/passport/bin/passport`
+4. Generates a 32-byte raw master key at `/etc/passport/key` (if not present)
 5. Creates `/etc/passport/env` for optional environment variables
-6. Generates a self-signed TLS certificate at `/etc/passport/tls/` (if not present)
-7. Sets ownership and permissions
-8. Installs the systemd unit file
+6. Sets ownership and permissions
+7. Installs the systemd unit, then enables and restarts the service
+
+> **The script does not create TLS certificates.** Only the package `postinstall` does. Because the generated `config.yaml` points at `/etc/passport/tls/`, a from-source install will fail to start until you either put a certificate and key at those paths or blank `tls_cert`/`tls_key` to fall back to plain HTTP. See [TLS](#tls).
 
 ### systemd Service
 
@@ -1560,7 +1615,7 @@ Optional. Enable by setting a file path.
 ```yaml
 logging:
   file:
-    path: /opt/passport/passport.log
+    path: /opt/passport/logs/passport.log
     format: json    # Structured for log aggregation (ELK, Splunk, etc.)
     level: debug    # Capture everything for troubleshooting
 ```
@@ -1623,38 +1678,44 @@ level=INFO msg="audit log file reopened"
 
 #### Linux (logrotate)
 
-Create `/etc/logrotate.d/passport`:
+The RPM and DEB packages already install `/etc/logrotate.d/passport`:
 
 ```
-/opt/passport/passport.log /opt/passport/audit.log {
+/opt/passport/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 passport passport
+    sharedscripts
+    postrotate
+        systemctl reload passport >/dev/null 2>&1 || true
+    endscript
+}
+```
+
+`systemctl reload` maps to `ExecReload=/bin/kill -HUP $MAINPID` in the unit file, which is what makes PassPort reopen its files. Point `logging.file.path` and `audit.file_path` inside `/opt/passport/logs/` to be covered by it.
+
+If you installed from source, or keep the logs elsewhere, create `/etc/logrotate.d/passport` yourself:
+
+```
+/opt/passport/logs/passport.log /opt/passport/logs/audit.log {
     daily
     rotate 30
     compress
     delaycompress
     missingok
     notifempty
-    copytruncate
+    sharedscripts
     postrotate
-        /bin/kill -HUP $(cat /run/passport.pid 2>/dev/null) 2>/dev/null || true
+        systemctl reload passport >/dev/null 2>&1 || true
     endscript
 }
 ```
 
-If you're using systemd and don't have a PID file, use `systemctl` instead:
-
-```
-/opt/passport/passport.log /opt/passport/audit.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    missingok
-    notifempty
-    postrotate
-        /bin/systemctl kill -s HUP passport.service 2>/dev/null || true
-    endscript
-}
-```
+> **Note:** PassPort does not write a PID file. Signal it through systemd (`systemctl reload passport`, or `systemctl kill -s HUP passport.service`) rather than `kill -HUP $(cat …)`. Do not combine `copytruncate` with a `SIGHUP` postrotate — pick one or the other, or rotated files will be truncated out from under the reopen.
 
 Test the configuration:
 
@@ -1668,25 +1729,25 @@ sudo logrotate -f /etc/logrotate.d/passport   # force rotation
 Add to `/etc/newsyslog.d/passport.conf`:
 
 ```
-# logfile                              mode  count  size   when  flags  pid_file          signal
-/opt/passport/passport.log             644   30     10240  $D0   J      /run/passport.pid  1
-/opt/passport/audit.log                644   30     10240  $D0   J      /run/passport.pid  1
+# logfile                              mode  count  size   when  flags
+/opt/passport/logs/passport.log        644   30     10240  $D0   JC
+/opt/passport/logs/audit.log           644   30     10240  $D0   JC
 ```
+
+Because PassPort writes no PID file, newsyslog cannot signal it; the `C` flag recreates the log so the running process keeps writing to the renamed descriptor until the next restart. Send `SIGHUP` yourself after rotation (`kill -HUP $(pgrep -x passport)`) if you need the reopen to happen immediately.
 
 Column reference:
 - `mode` — file permissions after rotation
 - `count` — number of rotated files to keep
 - `size` — rotate if file exceeds this size (KB); `*` for no size limit
 - `when` — `$D0` = daily at midnight; `$W0` = weekly on Sunday
-- `flags` — `J` = compress with bzip2; `Z` = compress with gzip
-- `pid_file` — path to PID file (PassPort writes PID here)
-- `signal` — signal number to send (`1` = SIGHUP)
+- `flags` — `J` = compress with bzip2; `Z` = compress with gzip; `C` = create the log file if missing
 
-If you run PassPort via launchd and don't have a PID file, use a wrapper script:
+To have the reopen happen as part of rotation, use a wrapper script instead:
 
 ```
 # logfile                              mode  count  size   when  flags  /path/to/script
-/opt/passport/passport.log             644   30     *      $D0   JR     /opt/passport/rotate.sh
+/opt/passport/logs/passport.log        644   30     *      $D0   JR     /opt/passport/rotate.sh
 ```
 
 `/opt/passport/rotate.sh`:
@@ -1786,6 +1847,8 @@ Returns `200 OK` if the application is ready to serve traffic. Checks:
 {"status": "not ready", "error": "migrations not complete"}
 ```
 
+The `error` value is one of `database unreachable`, `migration state unavailable`, or `migrations not complete`. Because the endpoint is unauthenticated, it never returns the underlying driver error -- check the application log for the detail.
+
 ### Usage Examples
 
 **Kubernetes:**
@@ -1843,6 +1906,7 @@ Both backup and export include all configuration data:
 | User-IDP mappings | Yes |
 | SMTP configuration + credentials | Yes |
 | MFA providers + credentials | Yes |
+| Default MFA provider + MFA-on-login setting | Yes |
 | Branding settings | Yes |
 | Email templates | Yes |
 
@@ -1890,21 +1954,26 @@ Import is additive — existing records are updated (upserted), new records are 
 
 ### Web UI Export/Import
 
-Admins can also export and import from the web interface:
+Admins can also export and import from the web interface. Unlike the CLI flags, the web UI works with a **ZIP archive** — `passport-export-<date>.zip` containing `passport-export.json` plus an `uploads/` folder — so logos travel with the configuration.
 
 1. Go to **Admin > Import/Export**
-2. **Export:** Click "Download Export" to download a JSON file (secrets decrypted)
-3. **Import:** Upload a JSON file and select which sections to import using the checkboxes:
+2. **Export:** Click **Download Export** to download the ZIP (secrets decrypted, same format as `-export`)
+3. **Import:** Upload a ZIP produced by this page (max 50 MB) and select which sections to import using the checkboxes:
+   - Local Admins
    - Identity Providers
    - Admin Groups
    - User Mappings
-   - SMTP Configuration
-   - MFA Providers
+   - SMTP Settings
+   - MFA Settings
    - Branding
    - Email Templates
-   - Local Admins
+   - Upload Files
 
 The web UI import shows a results summary of what was imported and any errors.
+
+> Provider groups and the login-page arrangement travel with the Identity Providers section; they have no checkbox of their own.
+
+> The web UI import expects a ZIP. A bare `.json` file produced by `-backup` or `-export` must be imported with the `-import` flag instead.
 
 ### Migration Workflow
 
@@ -1947,21 +2016,30 @@ The backup/export file is JSON with this top-level structure:
   "exported_at": "2026-03-28T12:00:00Z",
   "secrets_encrypted": false,
   "local_admins": [...],
+  "idp_groups": [...],
+  "local_admin_placement": {...},
   "identity_providers": [...],
   "admin_groups": [...],
   "user_mappings": [...],
   "smtp_config": {...},
   "mfa_providers": [...],
+  "default_mfa_provider_id": "duo",
+  "mfa_login_required": false,
   "branding": {...},
   "email_templates": [...]
 }
 ```
 
+`idp_groups` and `local_admin_placement` are omitted entirely when nothing has been arranged, and files written before those features existed simply lack them.
+
 The `secrets_encrypted` field indicates whether secret values are plaintext JSON (`false`, from `-export` or web UI) or base64-encoded encrypted blobs (`true`, from `-backup`).
 
 ### Uploaded Files
 
-Logo files (branding logo, IDP logos) are stored in the `uploads/` directory and are **not included** in the export. Copy the `uploads/` directory separately if you need to preserve logos:
+Logo files (branding logo, IDP logos) live in the `uploads/` directory.
+
+- **Web UI export/import:** included in the ZIP and restored when the **Upload Files** section is ticked. Nothing extra to do.
+- **CLI `-backup` / `-export` / `-import`:** **not** included — those write and read a single JSON file. Copy the directory separately:
 
 ```bash
 rsync -a /opt/passport/uploads/ newserver:/opt/passport/uploads/

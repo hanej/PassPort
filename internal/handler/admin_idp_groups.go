@@ -171,7 +171,7 @@ func (h *AdminIDPGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "idp_group_created",
+		Action:   audit.ActionIDPGroupCreate,
 		Result:   "success",
 		Details:  fmt.Sprintf("Provider group %q created (id=%d)", group.Name, group.ID),
 	})
@@ -232,7 +232,7 @@ func (h *AdminIDPGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "idp_group_updated",
+		Action:   audit.ActionIDPGroupUpdate,
 		Result:   "success",
 		Details:  fmt.Sprintf("Provider group %q updated (id=%d)", group.Name, group.ID),
 	})
@@ -265,7 +265,7 @@ func (h *AdminIDPGroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "idp_group_deleted",
+		Action:   audit.ActionIDPGroupDelete,
 		Result:   "success",
 		Details:  fmt.Sprintf("Provider group id=%d deleted; its providers are now ungrouped", id),
 	})
@@ -370,7 +370,7 @@ func (h *AdminIDPGroupHandler) Arrange(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), &db.AuditEntry{
 		Username: sess.Username,
 		SourceIP: r.RemoteAddr,
-		Action:   "idp_groups_arranged",
+		Action:   audit.ActionIDPGroupsArrange,
 		Result:   "success",
 		Details:  fmt.Sprintf("Arranged %d provider(s) across %d group(s)", len(placements), len(groupOrder)),
 	})

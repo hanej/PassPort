@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -251,9 +253,8 @@ func (h *DashboardHandler) ShowDashboard(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// ChangePassword processes a per-IDP password change request.
-// If MFA is enabled and the session has not been recently verified via MFA,
-// the user is redirected to the MFA flow first.
+// ChangePassword processes a per-IDP password change request. It does not
+// trigger MFA; the second factor, when required, is collected at login.
 // POST /dashboard/change-password
 func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	sess := auth.SessionFromContext(r.Context())
@@ -339,8 +340,7 @@ func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 			Result:     audit.ResultFailure,
 			Details:    err.Error(),
 		})
-		errMsg := sanitizeDN(err.Error(), mapping.TargetAccountDN, sess.Username)
-		h.sessions.SetFlash(w, r, "error", "Password change failed: "+errMsg)
+		h.sessions.SetFlash(w, r, "error", "Password change failed: "+passwordChangeMessage(err))
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 		return
 	}
@@ -379,6 +379,24 @@ func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
 }
 
+// passwordChangeMessage maps a provider error to a message that is safe to show
+// an end user. Raw directory errors carry the endpoint, service account and
+// target DNs, so they never reach the browser; callers log them instead.
+func passwordChangeMessage(err error) string {
+	switch {
+	case errors.Is(err, idp.ErrPasswordPolicy):
+		return "the new password does not meet your organization's complexity, history, or minimum age requirements."
+	case strings.Contains(err.Error(), "current password is incorrect"):
+		return "current password is incorrect."
+	case errors.Is(err, idp.ErrAccountLocked):
+		return "your account is locked. Please contact your IT administrator."
+	case errors.Is(err, idp.ErrAccountDisabled):
+		return "your account is disabled. Please contact your IT administrator."
+	default:
+		return "please try again or contact your administrator."
+	}
+}
+
 // PublicIDPStatus returns only online/offline for an IDP. No error details are
 // exposed since this endpoint is available to unauthenticated users.
 // GET /idp-status/{id}
@@ -404,8 +422,9 @@ func (h *DashboardHandler) PublicIDPStatus(w http.ResponseWriter, r *http.Reques
 	h.renderer.JSON(w, http.StatusOK, map[string]string{"status": "online"})
 }
 
-// IDPStatus returns the connection status for an identity provider as JSON,
-// including error details for authenticated users.
+// IDPStatus returns the connection status for an identity provider as JSON.
+// The underlying error is logged but never returned: it carries the directory
+// endpoint and service account DN, which an ordinary user must not see.
 // GET /dashboard/idp-status/{id}
 func (h *DashboardHandler) IDPStatus(w http.ResponseWriter, r *http.Request) {
 	idpID := chi.URLParam(r, "id")
@@ -437,7 +456,7 @@ func (h *DashboardHandler) IDPStatus(w http.ResponseWriter, r *http.Request) {
 		)
 		h.renderer.JSON(w, http.StatusOK, map[string]string{
 			"status": "offline",
-			"error":  err.Error(),
+			"error":  "connection failed",
 		})
 		return
 	}
