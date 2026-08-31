@@ -1,6 +1,6 @@
 module github.com/hanej/passport
 
-go 1.26.5
+go 1.26.7
 
 require (
 	filippo.io/csrf v0.2.1
