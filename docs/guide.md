@@ -913,7 +913,7 @@ Use dry runs to verify your filter configuration before enabling the live cron j
 
 ### Running Immediately
 
-The **Run Now** button executes the notification job immediately (outside the cron schedule) and sends real emails. Use this after configuring templates and filters to trigger an immediate scan.
+The **Run Now** button opens a modal with two options: run the full job (executes the notification job immediately, outside the cron schedule, and sends real emails to every matched user) or send a test run to a single email address you provide. The test run still scans real directory data and applies your real filters and templates, but sends at most one warning email and one expired email — both redirected to that one address — so you can verify the complete flow without emailing real users or flooding the test address. Use this after configuring templates and filters to trigger an immediate scan.
 
 ### Per-IDP Email Templates
 

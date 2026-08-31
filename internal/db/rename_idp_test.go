@@ -168,6 +168,55 @@ func TestRenameIDP_RewritesEveryReference(t *testing.T) {
 	}
 }
 
+func TestRenameIDP_RewritesEmailTemplates(t *testing.T) {
+	ctx := context.Background()
+	d, err := OpenMemory()
+	if err != nil {
+		t.Fatalf("opening memory db: %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Migrate(ctx); err != nil {
+		t.Fatalf("migrating: %v", err)
+	}
+	seedRenameFixture(t, d)
+
+	seed := `
+		INSERT INTO email_templates (template_type, subject, body_html) VALUES
+		    ('password_expiration:corp-ad', 'Custom warning', '<p>warning</p>'),
+		    ('password_expired:corp-ad', 'Custom expired', '<p>expired</p>'),
+		    ('expiration_report:corp-ad', 'Custom report', '<p>report</p>'),
+		    ('expired_accounts_report:corp-ad', 'Custom expired report', '<p>expired report</p>');`
+	if _, err := d.writer.ExecContext(ctx, seed); err != nil {
+		t.Fatalf("seeding email templates: %v", err)
+	}
+
+	if _, err := d.RenameIDP(ctx, "corp-ad", "corp-ad-2", ""); err != nil {
+		t.Fatalf("renaming: %v", err)
+	}
+
+	for _, prefix := range perIDPTemplatePrefixes {
+		if n := countWhere(t, d, "email_templates", "template_type", prefix+":corp-ad"); n != 0 {
+			t.Errorf("%s:corp-ad should have been renamed, got %d row(s)", prefix, n)
+		}
+	}
+	if n := countWhere(t, d, "email_templates", "template_type", "password_expiration:corp-ad-2"); n != 1 {
+		t.Errorf("password_expiration:corp-ad-2 not found")
+	}
+	if n := countWhere(t, d, "email_templates", "template_type", "password_expired:corp-ad-2"); n != 1 {
+		t.Errorf("password_expired:corp-ad-2 not found")
+	}
+	if n := countWhere(t, d, "email_templates", "template_type", "expiration_report:corp-ad-2"); n != 1 {
+		t.Errorf("expiration_report:corp-ad-2 not found")
+	}
+	if n := countWhere(t, d, "email_templates", "template_type", "expired_accounts_report:corp-ad-2"); n != 1 {
+		t.Errorf("expired_accounts_report:corp-ad-2 not found")
+	}
+	// The global template has no suffix and must be left untouched.
+	if n := countWhere(t, d, "email_templates", "template_type", "password_expiration"); n != 1 {
+		t.Errorf("global password_expiration template should be untouched")
+	}
+}
+
 func TestRenameIDP_Errors(t *testing.T) {
 	ctx := context.Background()
 	d, err := OpenMemory()

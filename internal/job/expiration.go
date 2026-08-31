@@ -140,17 +140,26 @@ func (n *PasswordExpirationNotifier) loadSchedules(ctx context.Context) {
 // RunForIDP scans a single IDP's directory for expiring passwords and sends notifications.
 // Returns the number of notification emails sent.
 func (n *PasswordExpirationNotifier) RunForIDP(ctx context.Context, idpID string) (int, error) {
-	return n.runForIDP(ctx, idpID, false)
+	return n.runForIDP(ctx, idpID, false, "")
 }
 
 // RunForIDPManual is like RunForIDP but skips the "enabled" check, allowing
 // administrators to trigger a scan on-demand even if the scheduled cron is disabled.
 func (n *PasswordExpirationNotifier) RunForIDPManual(ctx context.Context, idpID string) (int, error) {
-	return n.runForIDP(ctx, idpID, true)
+	return n.runForIDP(ctx, idpID, true, "")
 }
 
-func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string, manual bool) (int, error) {
-	n.logger.Info("starting expiration scan", "idp_id", idpID, "manual", manual)
+// RunForIDPManualTest is like RunForIDPManual, but sends at most one warning
+// email and one expired email — both redirected to testRecipient instead of
+// the matched users. The scan, filters and template rendering all run
+// against real directory data, so this exercises the complete flow without
+// emailing real users or flooding the test address with one email per match.
+func (n *PasswordExpirationNotifier) RunForIDPManualTest(ctx context.Context, idpID, testRecipient string) (int, error) {
+	return n.runForIDP(ctx, idpID, true, testRecipient)
+}
+
+func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string, manual bool, testRecipient string) (int, error) {
+	n.logger.Info("starting expiration scan", "idp_id", idpID, "manual", manual, "test_mode", testRecipient != "")
 
 	// 1. Load expiration config
 	cfg, err := n.store.GetExpirationConfig(ctx, idpID)
@@ -319,11 +328,19 @@ func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string
 		}
 
 		// Send email
-		if err := email.SendHTML(emailCfg, user.Email, renderedSubject, renderedBody); err != nil {
-			n.logger.Warn("failed to send expiration notification", "username", user.Username, "email", user.Email, "error", err)
+		recipient := user.Email
+		if testRecipient != "" {
+			recipient = testRecipient
+		}
+		if err := email.SendHTML(emailCfg, recipient, renderedSubject, renderedBody); err != nil {
+			n.logger.Warn("failed to send expiration notification", "username", user.Username, "email", recipient, "error", err)
 			continue
 		}
 
+		details := fmt.Sprintf("Password expiration notification sent to %s (expires %s, %d days)", user.Email, user.ExpirationDate.Local().Format("2006-01-02"), user.DaysRemaining)
+		if testRecipient != "" {
+			details = fmt.Sprintf("TEST notification for %s redirected to %s (expires %s, %d days)", user.Email, testRecipient, user.ExpirationDate.Local().Format("2006-01-02"), user.DaysRemaining)
+		}
 		n.audit.Log(ctx, &db.AuditEntry{
 			Timestamp:  time.Now().UTC(),
 			Username:   user.Username,
@@ -331,16 +348,20 @@ func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string
 			Action:     audit.ActionExpirationNotification,
 			ProviderID: idpID,
 			Result:     audit.ResultSuccess,
-			Details:    fmt.Sprintf("Password expiration notification sent to %s (expires %s, %d days)", user.Email, user.ExpirationDate.Local().Format("2006-01-02"), user.DaysRemaining),
+			Details:    details,
 		})
 		sent++
+		// Test mode: one sample email is enough to validate the template/flow.
+		if testRecipient != "" {
+			break
+		}
 	}
 
 	n.logger.Info("expiration scan complete", "idp_id", idpID, "total_users", len(users), "notifications_sent", sent)
 
 	// 9. Send expired account notifications if configured
 	if cfg.DaysAfterExpiration != 0 {
-		expiredSent, err := n.sendExpiredNotifications(ctx, idpID, cfg, record, idpConfig, emailCfg, compiled, conn)
+		expiredSent, err := n.sendExpiredNotifications(ctx, idpID, cfg, record, idpConfig, emailCfg, compiled, conn, testRecipient)
 		if err != nil {
 			n.logger.Error("expired notifications failed", "idp_id", idpID, "error", err)
 		} else {
@@ -361,6 +382,7 @@ func (n *PasswordExpirationNotifier) sendExpiredNotifications(
 	emailCfg email.Config,
 	compiled []compiledFilter,
 	conn idp.LDAPConn,
+	testRecipient string,
 ) (int, error) {
 	// Load expired email template — check for IDP-specific first, fall back to global.
 	tmpl, err := n.store.GetEmailTemplate(ctx, "password_expired:"+idpID)
@@ -456,11 +478,19 @@ func (n *PasswordExpirationNotifier) sendExpiredNotifications(
 			continue
 		}
 
-		if err := email.SendHTML(emailCfg, user.Email, renderedSubject, renderedBody); err != nil {
-			n.logger.Warn("failed to send expired notification", "username", user.Username, "email", user.Email, "error", err)
+		recipient := user.Email
+		if testRecipient != "" {
+			recipient = testRecipient
+		}
+		if err := email.SendHTML(emailCfg, recipient, renderedSubject, renderedBody); err != nil {
+			n.logger.Warn("failed to send expired notification", "username", user.Username, "email", recipient, "error", err)
 			continue
 		}
 
+		details := fmt.Sprintf("Password expired notification sent to %s (expired %s, %d days ago)", user.Email, user.ExpirationDate.Local().Format("2006-01-02"), daysExpired)
+		if testRecipient != "" {
+			details = fmt.Sprintf("TEST expired notification for %s redirected to %s (expired %s, %d days ago)", user.Email, testRecipient, user.ExpirationDate.Local().Format("2006-01-02"), daysExpired)
+		}
 		n.audit.Log(ctx, &db.AuditEntry{
 			Timestamp:  time.Now().UTC(),
 			Username:   user.Username,
@@ -468,11 +498,14 @@ func (n *PasswordExpirationNotifier) sendExpiredNotifications(
 			Action:     audit.ActionExpiredNotification,
 			ProviderID: idpID,
 			Result:     audit.ResultSuccess,
-			Details:    fmt.Sprintf("Password expired notification sent to %s (expired %s, %d days ago)", user.Email, user.ExpirationDate.Local().Format("2006-01-02"), daysExpired),
+			Details:    details,
 		})
 		sent++
+		// Test mode: one sample email is enough to validate the template/flow.
+		if testRecipient != "" {
+			break
+		}
 	}
-
 	n.logger.Info("expired notifications complete", "idp_id", idpID, "total_expired", len(expiredUsers), "notifications_sent", sent)
 	return sent, nil
 }

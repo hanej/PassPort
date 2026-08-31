@@ -6,6 +6,10 @@ All notable changes to PassPort are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **"Run Now" can send a test scan to a single address** — the button on the Password Expiration page now opens a modal offering a choice between the real run (unchanged) and a test run, which scans real directory data and applies real filters/templates but sends at most one warning email and one expired email — both redirected to one address you provide — so the complete flow can be verified without emailing real users or flooding the test address with one email per matched account.
+
 ### Security
 
 - **Directory error details no longer reach end users** — `GET /dashboard/idp-status/{id}` returned the raw provider error, which carries the LDAP endpoint, service account DN and result code, to any authenticated user. It now returns a generic `connection failed`. The dashboard password-change and forgot-password reset flows likewise mapped the raw error into the flash message; both now use a fixed set of user-facing messages (policy violation, wrong current password, locked, disabled, generic). The full error is still recorded in the application log and the audit entry.
@@ -14,6 +18,8 @@ All notable changes to PassPort are documented in this file.
 
 ### Fixed
 
+- **Renaming an identity provider orphaned its per-IDP email templates** — `password_expiration:<id>` and `password_expired:<id>` template overrides are keyed by a composite string, not a plain slug column, so `RenameIDP` never rewrote them; after a rename the notifier silently fell back to the global template. The rename now updates these rows too.
+- **TinyMCE rewrote inserted email template links** — the rich-text editor's default relative-URL handling could rewrite a typed link (most visibly on templates whose type includes a colon, like `password_expiration:cc-corp-ad`) into a mangled relative path such as `../../../`. Link/image URLs are no longer rewritten; whatever is typed is what gets saved.
 - **Seven audit actions could not be filtered in the viewer** — `branding_updated`, `idp_group_created`, `idp_group_updated`, `idp_group_deleted`, `idp_groups_arranged`, `config_exported` and `config_imported` were written as bare string literals rather than `audit.Action*` constants, so they were recorded but absent from the Action dropdown. They are now constants and appear in `FilterOptions()` under the Identity Providers and Administration groups, making good on v1.2.0's claim that the filter cannot drift from what the log can contain.
 - **`maxPwdAge` lookup documented incorrectly** — the expiration job reads `maxPwdAge` from the domain root object named by the IDP's Base DN, not from the RootDSE, and it does not consult fine-grained password policies. The guide now says so, and warns that a Base DN below the domain root makes the scan fail.
 - **Log rotation examples referenced a PID file that PassPort never writes** — the `logrotate` and `newsyslog` samples in the guide pointed at `/run/passport.pid` and mixed `copytruncate` with a `SIGHUP` postrotate. They now use `systemctl reload passport` and the `/opt/passport/logs/` paths that the packages actually ship.

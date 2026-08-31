@@ -152,7 +152,7 @@ func newExpiredTestEnv(t *testing.T, providerType string) *expiredTestEnv {
 func (e *expiredTestEnv) send(t *testing.T, emailCfg email.Config, compiled []compiledFilter, conn idp.LDAPConn) (int, error) {
 	t.Helper()
 	return e.notifier.sendExpiredNotifications(
-		context.Background(), "corp", e.cfg, e.record, e.config, emailCfg, compiled, conn)
+		context.Background(), "corp", e.cfg, e.record, e.config, emailCfg, compiled, conn, "")
 }
 
 // adExpiredConn returns a mock connection that answers the maxPwdAge lookup and

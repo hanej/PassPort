@@ -1060,34 +1060,78 @@ function initRunNow() {
     var runBtn = document.getElementById('run-now-btn');
     if (!runBtn) return;
 
+    var modalEl = document.getElementById('runNowModal');
+    var modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+    var testRadio = document.getElementById('run-now-mode-test');
+    var fullRadio = document.getElementById('run-now-mode-full');
+    var testEmailInput = document.getElementById('run-now-test-email');
+    var confirmBtn = document.getElementById('run-now-confirm-btn');
+    var confirmSpinner = document.getElementById('run-now-confirm-spinner');
+    var errorEl = document.getElementById('run-now-modal-error');
+
+    function updateTestEmailState() {
+        if (testEmailInput) testEmailInput.disabled = !(testRadio && testRadio.checked);
+    }
+    if (testRadio) testRadio.addEventListener('change', updateTestEmailState);
+    if (fullRadio) fullRadio.addEventListener('change', updateTestEmailState);
+
     runBtn.addEventListener('click', function () {
+        if (errorEl) errorEl.classList.add('d-none');
+        if (modal) modal.show();
+    });
+
+    if (!confirmBtn) return;
+    confirmBtn.addEventListener('click', function () {
         var resultSpan = document.getElementById('run-now-result');
         var idpID = runBtn.getAttribute('data-idp-id');
         var csrf = getCSRFToken();
+        var testEmail = '';
 
-        runBtn.disabled = true;
+        if (testRadio && testRadio.checked) {
+            testEmail = (testEmailInput.value || '').trim();
+            if (!testEmail) {
+                errorEl.textContent = 'Enter an email address to send the test run to.';
+                errorEl.classList.remove('d-none');
+                return;
+            }
+        }
+        if (errorEl) errorEl.classList.add('d-none');
+
+        var body = new URLSearchParams();
+        if (testEmail) body.set('test_email', testEmail);
+
+        confirmBtn.disabled = true;
+        if (confirmSpinner) confirmSpinner.classList.remove('d-none');
         resultSpan.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>Running scan...</span>';
 
         fetch('/admin/idp/' + encodeURIComponent(idpID) + '/expiration/run', {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
                 'X-CSRF-Token': csrf
-            }
+            },
+            body: body.toString()
         })
         .then(function (response) { return response.json(); })
         .then(function (data) {
             if (data.status === 'success') {
                 resultSpan.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + escapeHtml(data.message) + '</span>';
+                if (modal) modal.hide();
             } else {
-                resultSpan.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + escapeHtml(data.message || 'Scan failed') + '</span>';
+                resultSpan.innerHTML = '';
+                errorEl.textContent = data.message || 'Scan failed';
+                errorEl.classList.remove('d-none');
             }
         })
         .catch(function () {
-            resultSpan.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Request failed</span>';
+            resultSpan.innerHTML = '';
+            errorEl.textContent = 'Request failed';
+            errorEl.classList.remove('d-none');
         })
         .finally(function () {
-            runBtn.disabled = false;
+            confirmBtn.disabled = false;
+            if (confirmSpinner) confirmSpinner.classList.add('d-none');
         });
     });
 }

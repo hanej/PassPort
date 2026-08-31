@@ -120,6 +120,13 @@ tinymce.init({
     content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; }',
     promotion: false,
     branding: false,
+    // Without these, TinyMCE rewrites inserted URLs relative to the current
+    // admin page (e.g. /admin/email-templates/password_expiration:cc-corp-ad/edit),
+    // which mangles them into paths like "../../../" — email links must stay
+    // exactly as typed since there is no page to be "relative" to.
+    relative_urls: false,
+    remove_script_host: false,
+    convert_urls: false,
     setup: function(editor) {
         window.insertVariable = function(variable) {
             editor.insertContent('{{"{{"}}.' + variable + '{{"}}"}}');

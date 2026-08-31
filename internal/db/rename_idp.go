@@ -48,6 +48,18 @@ type RenameIDPResult struct {
 // ErrIDPExists indicates the target slug is already in use.
 var ErrIDPExists = errors.New("identity provider already exists")
 
+// perIDPTemplatePrefixes lists the email template types that can carry a
+// ":<idpID>" suffix for a per-IDP override (see admin_email_templates.go's
+// IsPasswordExpirationTemplate/IsPasswordExpiredTemplate/IsReportTemplate).
+// email_templates.template_type is a composite string, not a plain slug
+// column, so it isn't covered by idpReferences and must be rewritten here.
+var perIDPTemplatePrefixes = []string{
+	"password_expiration",
+	"password_expired",
+	"expiration_report",
+	"expired_accounts_report",
+}
+
 // RenameIDP changes an identity provider's slug and rewrites every reference to
 // it, including the columns that carry no foreign key constraint. The logo_url
 // column is updated when newLogoURL is non-empty; renaming the file on disk is
@@ -114,6 +126,20 @@ func (d *DB) RenameIDP(ctx context.Context, oldID, newID, newLogoURL string) (*R
 			return nil, fmt.Errorf("updating logo_url: %w", err)
 		}
 		result.NewLogoURL = newLogoURL
+	}
+
+	for _, prefix := range perIDPTemplatePrefixes {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE email_templates SET template_type = ? WHERE template_type = ?`,
+			prefix+":"+newID, prefix+":"+oldID)
+		if err != nil {
+			return nil, fmt.Errorf("renaming %s email template: %w", prefix, err)
+		}
+		n, _ := res.RowsAffected()
+		if n > 0 {
+			result.Rows["email_templates.template_type"] += n
+			result.Total += n
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

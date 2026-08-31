@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -302,15 +303,42 @@ func (h *AdminExpirationHandler) Save(w http.ResponseWriter, r *http.Request) {
 }
 
 // RunNow triggers an immediate expiration scan for a single IDP. Returns JSON.
+// If the request includes a "test_email" value, every notification the scan
+// would send is redirected to that address instead of the real user, so an
+// admin can validate the complete flow without emailing real users.
 // POST /admin/idp/{id}/expiration/run
 func (h *AdminExpirationHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 	h.logger.Debug("RunNow called")
 
 	idpID := chi.URLParam(r, "id")
 
-	h.logger.Debug("running expiration scan now", "idp_id", idpID)
+	if err := r.ParseForm(); err != nil {
+		h.renderer.JSON(w, http.StatusOK, map[string]any{
+			"status":  "error",
+			"message": "Invalid form data",
+			"count":   0,
+		})
+		return
+	}
+	testEmail := strings.TrimSpace(r.FormValue("test_email"))
 
-	count, err := h.notifier.RunForIDPManual(r.Context(), idpID)
+	var count int
+	var err error
+	if testEmail != "" {
+		if _, addrErr := mail.ParseAddress(testEmail); addrErr != nil {
+			h.renderer.JSON(w, http.StatusOK, map[string]any{
+				"status":  "error",
+				"message": "Enter a valid email address to send the test run to",
+				"count":   0,
+			})
+			return
+		}
+		h.logger.Debug("running expiration scan now (test mode)", "idp_id", idpID, "test_email", testEmail)
+		count, err = h.notifier.RunForIDPManualTest(r.Context(), idpID, testEmail)
+	} else {
+		h.logger.Debug("running expiration scan now", "idp_id", idpID)
+		count, err = h.notifier.RunForIDPManual(r.Context(), idpID)
+	}
 	if err != nil {
 		h.logger.Error("run now failed", "error", err, "idp_id", idpID)
 		h.renderer.JSON(w, http.StatusOK, map[string]any{
@@ -323,9 +351,13 @@ func (h *AdminExpirationHandler) RunNow(w http.ResponseWriter, r *http.Request) 
 
 	h.logger.Debug("run now completed", "idp_id", idpID, "count", count)
 
+	message := fmt.Sprintf("Scan complete: %d notification(s) sent", count)
+	if testEmail != "" {
+		message = fmt.Sprintf("Test scan complete: %d notification(s) redirected to %s", count, testEmail)
+	}
 	h.renderer.JSON(w, http.StatusOK, map[string]any{
 		"status":  "success",
-		"message": fmt.Sprintf("Scan complete: %d notification(s) sent", count),
+		"message": message,
 		"count":   count,
 	})
 }

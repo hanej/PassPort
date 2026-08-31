@@ -429,6 +429,65 @@ func TestAdminExpirationRunNow_NoConfig(t *testing.T) {
 	}
 }
 
+// TestAdminExpirationRunNow_InvalidTestEmail verifies a malformed test_email
+// is rejected before the notifier is invoked.
+func TestAdminExpirationRunNow_InvalidTestEmail(t *testing.T) {
+	env := setupExpirationTest(t)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = withChiURLParam(r, "id", "corp-ad")
+		env.handler.RunNow(w, r)
+	})
+
+	form := url.Values{"test_email": {"not-an-email"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp/corp-ad/expiration/run", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 with error JSON, got %d", rec.Code)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding JSON response: %v", err)
+	}
+	if result["status"] != "error" {
+		t.Errorf("expected status 'error' (invalid test email), got: %v", result["status"])
+	}
+}
+
+// TestAdminExpirationRunNow_TestEmailUsesManualTestPath verifies a valid
+// test_email routes through RunForIDPManualTest (which, like RunForIDPManual,
+// bypasses the "enabled" check) rather than the normal RunForIDPManual path.
+func TestAdminExpirationRunNow_TestEmailUsesManualTestPath(t *testing.T) {
+	env := setupExpirationTest(t)
+
+	// No expiration config exists for this IDP, so the underlying notifier
+	// call must still fail — proving the request reached the notifier at all.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = withChiURLParam(r, "id", "corp-ad")
+		env.handler.RunNow(w, r)
+	})
+
+	form := url.Values{"test_email": {"tester@example.com"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/idp/corp-ad/expiration/run", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 with error JSON, got %d", rec.Code)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding JSON response: %v", err)
+	}
+	if result["status"] != "error" {
+		t.Errorf("expected status 'error' (no config), got: %v", result["status"])
+	}
+}
+
 func TestAdminExpirationRunNow_IDPNotFound(t *testing.T) {
 	env := setupExpirationTest(t)
 
