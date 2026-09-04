@@ -8,6 +8,14 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.2.1] - 2026-09-04
+
+### Dependencies
+- Go modules: `duosecurity/duo_universal_golang` v1.1.0 → v1.2.1, `modernc.org/sqlite` v1.56.0 → v1.57.0, `go-chi/chi/v5` v5.3.1 → v5.3.2.
+- CI workflows: `actions/checkout` v6.1.0 → v7.0.1, `actions/setup-go` v6.5.0 → v7.0.0, `softprops/action-gh-release` v2.6.1 → v3.0.3.
+
+---
+
 ## [v1.2.0] - 2026-08-31
 
 ### Upgrade Notes
