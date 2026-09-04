@@ -4,7 +4,7 @@ go 1.26.7
 
 require (
 	filippo.io/csrf v0.2.1
-	github.com/duosecurity/duo_universal_golang v1.1.0
+	github.com/duosecurity/duo_universal_golang v1.2.1
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/google/uuid v1.6.0
@@ -12,7 +12,7 @@ require (
 	github.com/yuin/goldmark v1.8.5
 	golang.org/x/crypto v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
