@@ -6,6 +6,10 @@ All notable changes to PassPort are documented in this file.
 
 ## [Unreleased]
 
+### Dependencies
+- Go modules: `golang.org/x/crypto` v0.55.0 → v0.57.0, `modernc.org/sqlite` v1.57.0 → v1.59.0, `yuin/goldmark` v1.8.5 → v1.8.6. The `x/crypto` bump clears GO-2026-6354 and GO-2026-6355 (`golang.org/x/crypto/ssh` denial of service); neither package is imported by PassPort, so the advisories were unreachable.
+- CI workflows: `codecov/codecov-action` v7.0.0 → v7.1.0.
+
 ---
 
 ## [v1.2.1] - 2026-09-04
