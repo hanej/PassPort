@@ -8,6 +8,15 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.2.3] - 2026-09-24
+
+### Fixed
+- **Password changes failed with "current password is incorrect" after an account was renamed or moved** — Login finds an Active Directory account by `sAMAccountName`, which survives a rename, so the user could still sign in. A password change instead binds with the DN saved in the account mapping, and that DN no longer existed. AD answers a bind to a missing DN with the same `52e` code as a wrong password, so the user was told their current password was incorrect. The dashboard's password rules also went missing for that account, because reading the policy from the old DN failed with `No Such Object`. The login self-mapping and auto-correlation skipped any account that already had a mapping, so the saved DN was never updated. Both now repoint existing automatic mappings at the DN the directory currently reports, and the user's next login fixes the mapping without any admin action. Manual links are left untouched. DNs are compared ignoring case, so a case-only difference is not treated as a change.
+- **Existing account mappings were never re-verified once every provider was linked** — Background correlation ran at login only while at least one directory provider was still unlinked, so a fully linked user's mappings were never checked again, however stale they became. It now runs on every login. This adds a background directory lookup per provider on each login, which doesn't slow the login itself. Manual links are also re-checked more often, and one whose account no longer exists is removed on the next login.
+- **A renamed account was unlinked instead of followed** — When re-verifying an automatic mapping found the same account under a new DN, the mapping was deleted and the account showed as unlinked until a later login recreated it. The mapping is now updated in place and keeps its ID, link type and original link date.
+
+---
+
 ## [v1.2.2] - 2026-09-21
 
 ### Dependencies
