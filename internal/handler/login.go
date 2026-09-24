@@ -335,6 +335,13 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 				"provider_id", providerID,
 				"username", username,
 			)
+			if n, err := h.store.RefreshAutoMappingDN(r.Context(), username, providerID, dn, time.Now().UTC()); err != nil {
+				h.logger.Warn("failed to refresh self-mapping DN",
+					"provider_id", providerID, "username", username, "error", err)
+			} else if n > 0 {
+				h.logger.Info("refreshed stale self-mapping DN",
+					"provider_id", providerID, "username", username, "target_dn", dn, "rows", n)
+			}
 		} else {
 			now := time.Now().UTC()
 			mapping := &db.UserIDPMapping{
@@ -362,57 +369,18 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 		}
 	}
 
-	// Run correlation for cross-IDP mappings in the background, but only if
-	// there are IDPs without an existing mapping. If we cannot determine this
-	// (e.g. a DB error), default to running correlation.
+	// Run correlation in the background on every login: besides linking new IDPs it
+	// re-verifies existing mappings, which is what picks up renamed or moved accounts.
 	if h.correlator != nil {
-		runCorrelation := true
-		enabledIDPs, idpErr := h.store.ListEnabledIDPs(r.Context())
-		existingMappings, mapErr := h.store.ListMappings(r.Context(), providerID, username)
-		if idpErr != nil {
-			h.logger.Warn("correlation pre-flight: failed to list enabled IDPs, running correlation as fallback",
-				"provider_id", providerID,
-				"username", username,
-				"error", idpErr,
-			)
-		} else if mapErr != nil {
-			h.logger.Warn("correlation pre-flight: failed to list existing mappings, running correlation as fallback",
-				"provider_id", providerID,
-				"username", username,
-				"error", mapErr,
-			)
-		} else {
-			linked := make(map[string]struct{}, len(existingMappings))
-			for _, m := range existingMappings {
-				linked[m.TargetIDPID] = struct{}{}
+		go func() {
+			if err := h.correlator.CorrelateUser(context.Background(), providerID, username); err != nil {
+				h.logger.Warn("background correlation failed",
+					"provider_id", providerID,
+					"username", username,
+					"error", err,
+				)
 			}
-			runCorrelation = false
-			for _, rec := range enabledIDPs {
-				if !idp.ProviderType(rec.ProviderType).IsDirectory() {
-					continue
-				}
-				if _, ok := linked[rec.ID]; !ok {
-					runCorrelation = true
-					break
-				}
-			}
-		}
-		if runCorrelation {
-			go func() {
-				if err := h.correlator.CorrelateUser(context.Background(), providerID, username); err != nil {
-					h.logger.Warn("background correlation failed",
-						"provider_id", providerID,
-						"username", username,
-						"error", err,
-					)
-				}
-			}()
-		} else {
-			h.logger.Debug("correlation skipped, all IDPs already linked",
-				"provider_id", providerID,
-				"username", username,
-			)
-		}
+		}()
 	}
 
 	// Check if MFA on login is required for IDP users.

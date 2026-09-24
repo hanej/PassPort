@@ -271,6 +271,7 @@ type MappingStore interface {
 	// currently logged in with (e.g. same username in corp-ad and redhat-idm).
 	GetMappingForTarget(ctx context.Context, authUsername, targetIDPID string) (*UserIDPMapping, error)
 	HasMappingToTarget(ctx context.Context, authUsername, targetIDPID string) (bool, error)
+	RefreshAutoMappingDN(ctx context.Context, authUsername, targetIDPID, dn string, verifiedAt time.Time) (int64, error)
 	ListMappings(ctx context.Context, authProviderID, authUsername string) ([]UserIDPMapping, error)
 	SearchMappings(ctx context.Context, filter MappingSearchFilter) ([]UserIDPMapping, int, error)
 	UpsertMapping(ctx context.Context, m *UserIDPMapping) error

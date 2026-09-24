@@ -1014,6 +1014,61 @@ func TestHasMappingToTarget(t *testing.T) {
 	}
 }
 
+func TestRefreshAutoMappingDN(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+	createTestIDP(t, d, "idp-a")
+	createTestIDP(t, d, "idp-b")
+	createTestIDP(t, d, "idp-c")
+
+	for _, m := range []*UserIDPMapping{
+		{AuthProviderID: "idp-a", TargetIDPID: "idp-b", TargetAccountDN: "CN=Old Name,DC=b", LinkType: "auto"},
+		{AuthProviderID: "idp-c", TargetIDPID: "idp-b", TargetAccountDN: "CN=Old Name,DC=b", LinkType: "manual"},
+	} {
+		m.AuthUsername = "jsmith"
+		m.LinkedAt = time.Now().UTC()
+		if err := d.UpsertMapping(ctx, m); err != nil {
+			t.Fatalf("upserting mapping: %v", err)
+		}
+	}
+
+	n, err := d.RefreshAutoMappingDN(ctx, "jsmith", "idp-b", "CN=New Name,DC=b", time.Now())
+	if err != nil {
+		t.Fatalf("RefreshAutoMappingDN: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 row refreshed, got %d", n)
+	}
+
+	auto, err := d.GetMapping(ctx, "idp-a", "jsmith", "idp-b")
+	if err != nil {
+		t.Fatalf("GetMapping auto: %v", err)
+	}
+	if auto.TargetAccountDN != "CN=New Name,DC=b" {
+		t.Errorf("auto mapping DN = %q, want refreshed", auto.TargetAccountDN)
+	}
+	if auto.VerifiedAt == nil {
+		t.Error("expected verified_at to be set on refresh")
+	}
+
+	manual, err := d.GetMapping(ctx, "idp-c", "jsmith", "idp-b")
+	if err != nil {
+		t.Fatalf("GetMapping manual: %v", err)
+	}
+	if manual.TargetAccountDN != "CN=Old Name,DC=b" {
+		t.Errorf("manual mapping DN = %q, want untouched", manual.TargetAccountDN)
+	}
+
+	// DNs compare case-insensitively, so a case-only difference is not a change.
+	n, err = d.RefreshAutoMappingDN(ctx, "jsmith", "idp-b", "cn=new name,dc=b", time.Now())
+	if err != nil {
+		t.Fatalf("RefreshAutoMappingDN (same DN): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 rows for case-only difference, got %d", n)
+	}
+}
+
 func TestListAllMappings(t *testing.T) {
 	d := newTestDB(t)
 	ctx := context.Background()

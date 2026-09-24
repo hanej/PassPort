@@ -223,6 +223,21 @@ func (d *DB) UpsertMapping(ctx context.Context, m *UserIDPMapping) error {
 	return nil
 }
 
+// RefreshAutoMappingDN points every auto mapping for authUsername -> targetIDPID at dn,
+// so a renamed or moved account doesn't keep a stale DN. Manual links are left alone.
+// Returns the number of rows changed.
+func (d *DB) RefreshAutoMappingDN(ctx context.Context, authUsername, targetIDPID, dn string, verifiedAt time.Time) (int64, error) {
+	res, err := d.writer.ExecContext(ctx, `
+		UPDATE user_idp_mappings SET target_account_dn = ?, verified_at = ?
+		WHERE auth_username = ? AND target_idp_id = ? AND link_type = 'auto'
+			AND target_account_dn <> ? COLLATE NOCASE`,
+		dn, verifiedAt.UTC().Format(tsLayout), authUsername, targetIDPID, dn)
+	if err != nil {
+		return 0, fmt.Errorf("refresh auto mapping dn: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // UpdateMappingVerified sets the verified_at timestamp for a mapping.
 func (d *DB) UpdateMappingVerified(ctx context.Context, id int64, verifiedAt time.Time) error {
 	res, err := d.writer.ExecContext(ctx, `

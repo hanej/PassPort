@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/hanej/passport/internal/db"
@@ -27,6 +28,7 @@ type CorrelationStore interface {
 	GetCorrelationRule(ctx context.Context, idpID string) (*db.CorrelationRule, error)
 	GetMapping(ctx context.Context, authProviderID, authUsername, targetIDPID string) (*db.UserIDPMapping, error)
 	HasMappingToTarget(ctx context.Context, authUsername, targetIDPID string) (bool, error)
+	RefreshAutoMappingDN(ctx context.Context, authUsername, targetIDPID, dn string, verifiedAt time.Time) (int64, error)
 	UpsertMapping(ctx context.Context, m *db.UserIDPMapping) error
 	UpdateMappingVerified(ctx context.Context, id int64, verifiedAt time.Time) error
 	DowngradeMapping(ctx context.Context, id int64) error
@@ -266,12 +268,22 @@ func (e *Engine) verifyAutoMapping(ctx context.Context, m *db.UserIDPMapping, ta
 		return result, nil
 	}
 
-	// Match found — re-verify. Ensure it is the same DN.
-	if dn != m.TargetAccountDN {
-		// DN changed — downgrade old, could re-link but safer to let next pass handle it.
-		if downErr := e.store.DowngradeMapping(ctx, m.ID); downErr != nil {
-			return nil, fmt.Errorf("downgrading auto mapping (dn changed): %w", downErr)
+	// Same account, new DN (renamed or moved): repoint the mapping rather than unlinking it.
+	if !strings.EqualFold(dn, m.TargetAccountDN) {
+		now := time.Now().UTC()
+		updated := *m
+		updated.TargetAccountDN = dn
+		updated.VerifiedAt = &now
+		if err := e.store.UpsertMapping(ctx, &updated); err != nil {
+			return nil, fmt.Errorf("refreshing auto mapping DN: %w", err)
 		}
+		e.logger.Info("auto mapping DN changed, refreshed",
+			"mapping_id", m.ID,
+			"old_dn", m.TargetAccountDN,
+			"new_dn", dn,
+		)
+		result.LinkState = LinkStateLinkedAuto
+		result.TargetAccountDN = dn
 		return result, nil
 	}
 
@@ -384,6 +396,13 @@ func (e *Engine) attemptAutoCorrelation(ctx context.Context, authProviderID, aut
 			"target_idp", target.ID,
 			"auth_user", authUsername,
 		)
+		if n, err := e.store.RefreshAutoMappingDN(ctx, authUsername, target.ID, dn, time.Now().UTC()); err != nil {
+			e.logger.Warn("failed to refresh auto mapping DN",
+				"target_idp", target.ID, "auth_user", authUsername, "error", err)
+		} else if n > 0 {
+			e.logger.Info("auto-correlation: refreshed stale mapping DN",
+				"target_idp", target.ID, "auth_user", authUsername, "target_dn", dn, "rows", n)
+		}
 		result.LinkState = LinkStateLinkedAuto
 		result.TargetAccountDN = dn
 		return result, nil

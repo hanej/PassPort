@@ -62,12 +62,16 @@ type mockCorrelator struct {
 	providerID string
 	username   string
 	err        error
+	calls      chan string // when set, receives "provider|username" per call
 }
 
 func (m *mockCorrelator) CorrelateUser(_ context.Context, providerID, username string) error {
 	m.called = true
 	m.providerID = providerID
 	m.username = username
+	if m.calls != nil {
+		m.calls <- providerID + "|" + username
+	}
 	return m.err
 }
 
@@ -758,6 +762,14 @@ type mockLoginErrStore struct {
 	getMFAProviderForIDPRecord *db.MFAProviderRecord
 	updateSessionMFAErr        error
 	getAdminGroupsByIDPErr     error
+	refreshMappingDNErr        error
+}
+
+func (m *mockLoginErrStore) RefreshAutoMappingDN(ctx context.Context, authUsername, targetIDPID, dn string, verifiedAt time.Time) (int64, error) {
+	if m.refreshMappingDNErr != nil {
+		return 0, m.refreshMappingDNErr
+	}
+	return m.DB.RefreshAutoMappingDN(ctx, authUsername, targetIDPID, dn, verifiedAt)
 }
 
 func (m *mockLoginErrStore) ListEnabledIDPs(ctx context.Context) ([]db.IdentityProviderRecord, error) {
@@ -986,6 +998,129 @@ func TestLoginProvider_SkipsSelfMappingWhenExists(t *testing.T) {
 
 	if rec.Code != http.StatusFound {
 		t.Errorf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A renamed AD account keeps its sAMAccountName but gets a new DN; login must
+// repoint the existing auto mapping or password changes bind to a dead DN.
+func TestLoginProvider_RefreshesStaleSelfMappingDN(t *testing.T) {
+	env := setupLoginTest(t)
+	env.createIDPRecord(t, "corp-ad", "Corporate AD")
+
+	currentDN := "CN=New Name,OU=Users,DC=example,DC=com"
+	env.registry.Register("corp-ad", &mockProviderWithDN{
+		mockProvider: mockProvider{id: "corp-ad"},
+		searchUserDN: currentDN,
+	})
+
+	if err := env.db.UpsertMapping(context.Background(), &db.UserIDPMapping{
+		AuthProviderID:  "corp-ad",
+		AuthUsername:    "jdoe",
+		TargetIDPID:     "corp-ad",
+		TargetAccountDN: "CN=Old Name,OU=Users,DC=example,DC=com",
+		LinkType:        "auto",
+		LinkedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("provider_id", "corp-ad")
+	form.Set("username", "jdoe")
+	form.Set("password", "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	env.handler.Login(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	m, err := env.db.GetMapping(context.Background(), "corp-ad", "jdoe", "corp-ad")
+	if err != nil {
+		t.Fatalf("GetMapping: %v", err)
+	}
+	if m.TargetAccountDN != currentDN {
+		t.Errorf("mapping DN = %q, want %q", m.TargetAccountDN, currentDN)
+	}
+}
+
+// Correlation re-verifies existing mappings, so it must run even when every IDP is linked.
+func TestLoginProvider_CorrelatesWhenAllIDPsLinked(t *testing.T) {
+	env := setupLoginTest(t)
+	env.createIDPRecord(t, "corp-ad", "Corporate AD")
+	env.correlator.calls = make(chan string, 1)
+
+	dn := "CN=jdoe,DC=example,DC=com"
+	env.registry.Register("corp-ad", &mockProviderWithDN{
+		mockProvider: mockProvider{id: "corp-ad"},
+		searchUserDN: dn,
+	})
+	if err := env.db.UpsertMapping(context.Background(), &db.UserIDPMapping{
+		AuthProviderID: "corp-ad", AuthUsername: "jdoe", TargetIDPID: "corp-ad",
+		TargetAccountDN: dn, LinkType: "auto", LinkedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("provider_id", "corp-ad")
+	form.Set("username", "jdoe")
+	form.Set("password", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	env.handler.Login(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case got := <-env.correlator.calls:
+		if got != "corp-ad|jdoe" {
+			t.Errorf("correlated %q, want %q", got, "corp-ad|jdoe")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("correlation did not run for a fully linked user")
+	}
+}
+
+func TestLoginProvider_RefreshSelfMappingDNError(t *testing.T) {
+	database := setupTestDB(t)
+	mockStore := &mockLoginErrStore{
+		DB:                  database,
+		refreshMappingDNErr: fmt.Errorf("database is locked"),
+	}
+	h := newMockLoginHandler(t, mockStore, database)
+
+	if err := database.CreateIDP(context.Background(), &db.IdentityProviderRecord{
+		ID: "corp-ad", FriendlyName: "Corporate AD", ProviderType: "ad", Enabled: true, ConfigJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("creating IDP: %v", err)
+	}
+	h.registry.Register("corp-ad", &mockProviderWithDN{
+		mockProvider: mockProvider{id: "corp-ad"},
+		searchUserDN: "CN=New Name,DC=example,DC=com",
+	})
+	if err := database.UpsertMapping(context.Background(), &db.UserIDPMapping{
+		AuthProviderID: "corp-ad", AuthUsername: "jdoe", TargetIDPID: "corp-ad",
+		TargetAccountDN: "CN=Old Name,DC=example,DC=com", LinkType: "auto", LinkedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upserting mapping: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("provider_id", "corp-ad")
+	form.Set("username", "jdoe")
+	form.Set("password", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.Login(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("expected login to succeed despite refresh error, got %d", rec.Code)
 	}
 }
 

@@ -71,6 +71,7 @@ type mockStore struct {
 	updateMappingVerifiedErr error
 	downgradeMappingErr      error
 	deleteCorrelationWarnErr error
+	refreshMappingDNErr      error
 }
 
 func newMockStore() *mockStore {
@@ -133,6 +134,20 @@ func (s *mockStore) HasMappingToTarget(_ context.Context, authUsername, targetID
 		}
 	}
 	return false, nil
+}
+
+func (s *mockStore) RefreshAutoMappingDN(_ context.Context, authUsername, targetIDPID, dn string, _ time.Time) (int64, error) {
+	if s.refreshMappingDNErr != nil {
+		return 0, s.refreshMappingDNErr
+	}
+	var n int64
+	for _, m := range s.mappings {
+		if m.AuthUsername == authUsername && m.TargetIDPID == targetIDPID && m.LinkType == "auto" && !strings.EqualFold(m.TargetAccountDN, dn) {
+			m.TargetAccountDN = dn
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (s *mockStore) UpsertMapping(_ context.Context, m *db.UserIDPMapping) error {
@@ -708,26 +723,100 @@ func TestCorrelateUser_MultipleIDPs(t *testing.T) {
 	}
 }
 
-func TestVerifyAutoMapping_DNChanged_Downgraded(t *testing.T) {
-	// Existing auto mapping holds targetDN, but the LDAP search now returns a different DN.
-	// The engine should downgrade the mapping and return unlinked.
+func TestVerifyAutoMapping_DNChanged_Refreshed(t *testing.T) {
+	// Existing auto mapping holds targetDN, but the correlation search now returns a
+	// different DN (account renamed or moved). The mapping must follow it, not unlink.
 	const differentDN = "CN=jdoe_renamed,OU=Users,DC=example,DC=com"
 
+	for _, tc := range []struct {
+		name      string
+		upsertErr error
+	}{
+		{name: "refreshed"},
+		{name: "upsert error", upsertErr: errors.New("database is locked")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMockStore()
+			store.enabledIDPs = defaultEnabledIDPs()
+			store.correlationRule[targetIDP] = defaultRule()
+			store.attrMappings[authIDP] = defaultAttrMappings()
+			store.upsertMappingErr = tc.upsertErr
+
+			linkedAt := time.Now().UTC().Add(-24 * time.Hour)
+			store.mappings[mappingKey(authIDP, testUser, targetIDP)] = &db.UserIDPMapping{
+				ID:              77,
+				AuthProviderID:  authIDP,
+				AuthUsername:    testUser,
+				TargetIDPID:     targetIDP,
+				TargetAccountDN: targetDN,
+				LinkType:        "auto",
+				LinkedAt:        linkedAt,
+			}
+
+			authProv := &mockProvider{
+				id:       authIDP,
+				provType: idp.ProviderTypeAD,
+				getAttrFunc: func(_ context.Context, _, _ string) (string, error) {
+					return "jdoe@example.com", nil
+				},
+			}
+			targetProv := &mockProvider{
+				id:       targetIDP,
+				provType: idp.ProviderTypeAD,
+				searchFunc: func(_ context.Context, _, _ string) (string, error) {
+					return differentDN, nil
+				},
+			}
+
+			engine := setupEngine(store, authProv, targetProv)
+			results, err := engine.CorrelateUser(context.Background(), authIDP, testUser)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("expected 1 result, got %d", len(results))
+			}
+			r := results[0]
+			if len(store.downgradedIDs) != 0 {
+				t.Errorf("a changed DN must not unlink the mapping, got downgrades %v", store.downgradedIDs)
+			}
+
+			if tc.upsertErr != nil {
+				if r.LinkState != LinkStateUnlinked {
+					t.Errorf("expected %q on upsert error, got %q", LinkStateUnlinked, r.LinkState)
+				}
+				return
+			}
+
+			if r.LinkState != LinkStateLinkedAuto || r.TargetAccountDN != differentDN {
+				t.Errorf("result = (%q, %q), want (%q, %q)", r.LinkState, r.TargetAccountDN, LinkStateLinkedAuto, differentDN)
+			}
+			if len(store.upsertedMappings) != 1 {
+				t.Fatalf("expected 1 upsert, got %d", len(store.upsertedMappings))
+			}
+			got := store.mappings[mappingKey(authIDP, testUser, targetIDP)]
+			if got.TargetAccountDN != differentDN {
+				t.Errorf("stored DN = %q, want %q", got.TargetAccountDN, differentDN)
+			}
+			if got.ID != 77 || got.LinkType != "auto" || !got.LinkedAt.Equal(linkedAt) {
+				t.Errorf("refresh must keep identity: id=%d link_type=%q linked_at=%v", got.ID, got.LinkType, got.LinkedAt)
+			}
+			if got.VerifiedAt == nil {
+				t.Error("expected verified_at to be set")
+			}
+		})
+	}
+}
+
+// AD DNs are case-insensitive, so a case-only difference is the same account.
+func TestVerifyAutoMapping_DNCaseDifference_Verified(t *testing.T) {
 	store := newMockStore()
 	store.enabledIDPs = defaultEnabledIDPs()
 	store.correlationRule[targetIDP] = defaultRule()
 	store.attrMappings[authIDP] = defaultAttrMappings()
-
-	now := time.Now().UTC()
 	store.mappings[mappingKey(authIDP, testUser, targetIDP)] = &db.UserIDPMapping{
-		ID:              77,
-		AuthProviderID:  authIDP,
-		AuthUsername:    testUser,
-		TargetIDPID:     targetIDP,
-		TargetAccountDN: targetDN,
-		LinkType:        "auto",
-		LinkedAt:        now.Add(-24 * time.Hour),
-		VerifiedAt:      &now,
+		ID: 78, AuthProviderID: authIDP, AuthUsername: testUser, TargetIDPID: targetIDP,
+		TargetAccountDN: targetDN, LinkType: "auto", LinkedAt: time.Now().UTC(),
 	}
 
 	authProv := &mockProvider{
@@ -740,9 +829,8 @@ func TestVerifyAutoMapping_DNChanged_Downgraded(t *testing.T) {
 	targetProv := &mockProvider{
 		id:       targetIDP,
 		provType: idp.ProviderTypeAD,
-		// Returns a DN that differs from the stored targetDN.
 		searchFunc: func(_ context.Context, _, _ string) (string, error) {
-			return differentDN, nil
+			return strings.ToLower(targetDN), nil
 		},
 	}
 
@@ -751,15 +839,14 @@ func TestVerifyAutoMapping_DNChanged_Downgraded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if results[0].LinkState != LinkStateLinkedAuto {
+		t.Errorf("expected %q, got %q", LinkStateLinkedAuto, results[0].LinkState)
 	}
-	r := results[0]
-	if r.LinkState != LinkStateUnlinked {
-		t.Errorf("expected %q (DN changed → downgrade), got %q", LinkStateUnlinked, r.LinkState)
+	if len(store.downgradedIDs) != 0 || len(store.upsertedMappings) != 0 {
+		t.Errorf("expected no downgrade or rewrite, got downgrades=%v upserts=%d", store.downgradedIDs, len(store.upsertedMappings))
 	}
-	if len(store.downgradedIDs) != 1 || store.downgradedIDs[0] != 77 {
-		t.Errorf("expected downgrade of mapping 77, got %v", store.downgradedIDs)
+	if len(store.verifiedIDs) != 1 || store.verifiedIDs[0] != 78 {
+		t.Errorf("expected verified_at update for mapping 78, got %v", store.verifiedIDs)
 	}
 }
 
@@ -1359,6 +1446,57 @@ func TestAttemptAutoCorrelation_MappingAlreadyExists(t *testing.T) {
 	// No new mapping should have been upserted.
 	if len(store.upsertedMappings) != 0 {
 		t.Errorf("expected no new upserted mappings, got %d", len(store.upsertedMappings))
+	}
+}
+
+func TestAttemptAutoCorrelation_RefreshesStaleDN(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		refreshErr error
+		wantDN     string
+	}{
+		{name: "refreshed", wantDN: targetDN},
+		{name: "refresh error is non-fatal", refreshErr: errors.New("database is locked"), wantDN: "CN=old,DC=example,DC=com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMockStore()
+			store.enabledIDPs = defaultEnabledIDPs()
+			store.correlationRule[targetIDP] = defaultRule()
+			store.attrMappings[authIDP] = defaultAttrMappings()
+			store.refreshMappingDNErr = tc.refreshErr
+			stale := &db.UserIDPMapping{
+				ID: 100, AuthProviderID: "other-idp", AuthUsername: testUser,
+				TargetIDPID: targetIDP, TargetAccountDN: "CN=old,DC=example,DC=com", LinkType: "auto",
+			}
+			store.mappings[mappingKey("other-idp", testUser, targetIDP)] = stale
+
+			authProv := &mockProvider{
+				id:       authIDP,
+				provType: idp.ProviderTypeAD,
+				getAttrFunc: func(_ context.Context, _, _ string) (string, error) {
+					return "jdoe@example.com", nil
+				},
+			}
+			targetProv := &mockProvider{
+				id:       targetIDP,
+				provType: idp.ProviderTypeAD,
+				searchFunc: func(_ context.Context, _, _ string) (string, error) {
+					return targetDN, nil
+				},
+			}
+			engine := setupEngine(store, authProv, targetProv)
+
+			results, err := engine.CorrelateUser(context.Background(), authIDP, testUser)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if results[0].LinkState != LinkStateLinkedAuto {
+				t.Errorf("expected %q, got %q", LinkStateLinkedAuto, results[0].LinkState)
+			}
+			if stale.TargetAccountDN != tc.wantDN {
+				t.Errorf("mapping DN = %q, want %q", stale.TargetAccountDN, tc.wantDN)
+			}
+		})
 	}
 }
 
