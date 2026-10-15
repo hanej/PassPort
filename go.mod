@@ -6,7 +6,7 @@ require (
 	filippo.io/csrf v0.2.1
 	github.com/duosecurity/duo_universal_golang v1.2.1
 	github.com/go-chi/chi/v5 v5.3.2
-	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/uuid v1.6.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/yuin/goldmark v1.8.6
