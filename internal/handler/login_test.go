@@ -1664,3 +1664,76 @@ func TestLoginProvider_MustChangeSessionError(t *testing.T) {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
 }
+
+func TestAccountName(t *testing.T) {
+	h := &LoginHandler{logger: testLogger()}
+	cases := map[string]string{
+		"jdoe":                             "jdoe",
+		"jdoe@corp.example.com":            "jdoe",
+		"@corp.example.com":                "@corp.example.com",
+		"CN=J Doe@x,OU=Users,DC=corp,DC=x": "CN=J Doe@x,OU=Users,DC=corp,DC=x",
+	}
+	for in, want := range cases {
+		if got := h.accountName("corp-ad", in); got != want {
+			t.Errorf("accountName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// loginSessionUsername posts a provider login and returns the username stored on the new session.
+func loginSessionUsername(t *testing.T, env *loginTestEnv, username string) string {
+	t.Helper()
+	form := url.Values{}
+	form.Set("provider_id", "corp-ad")
+	form.Set("username", username)
+	form.Set("password", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	env.handler.Login(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "passport_session" && c.Value != "" {
+			sess, err := env.db.GetSession(context.Background(), c.Value)
+			if err != nil {
+				t.Fatalf("loading session: %v", err)
+			}
+			return sess.Username
+		}
+	}
+	t.Fatal("no session cookie set")
+	return ""
+}
+
+// An email-style identifier authenticates as the account name, so the session must carry
+// the account name or MFA's uid/sAMAccountName email lookup finds nobody.
+func TestLoginProvider_EmailIdentifierStoresAccountName(t *testing.T) {
+	env := setupLoginTest(t)
+	env.createIDPRecord(t, "corp-ad", "Corporate AD")
+	env.registry.Register("corp-ad", &mockProvider{id: "corp-ad", providerType: idp.ProviderTypeAD})
+	env.correlator.calls = make(chan string, 1)
+
+	if got := loginSessionUsername(t, env, "jdoe@corp.example.com"); got != "jdoe" {
+		t.Errorf("session username = %q, want jdoe", got)
+	}
+	select {
+	case call := <-env.correlator.calls:
+		if call != "corp-ad|jdoe" {
+			t.Errorf("correlator called with %q, want corp-ad|jdoe", call)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("correlator was not called")
+	}
+}
+
+func TestLoginProvider_EmailIdentifierMustChangeStoresAccountName(t *testing.T) {
+	env := setupLoginTest(t)
+	env.registry.Register("corp-ad", &mockProvider{id: "corp-ad", authErr: idp.ErrPasswordMustChange})
+
+	if got := loginSessionUsername(t, env, "jdoe@corp.example.com"); got != "jdoe" {
+		t.Errorf("session username = %q, want jdoe", got)
+	}
+}

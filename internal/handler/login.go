@@ -238,6 +238,7 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 	if err := provider.Authenticate(r.Context(), username, password); err != nil {
 		switch {
 		case errors.Is(err, idp.ErrPasswordMustChange), errors.Is(err, idp.ErrPasswordExpired):
+			username = h.accountName(providerID, username)
 			h.logger.Debug("user requires password change",
 				"provider_id", providerID,
 				"username", username,
@@ -278,6 +279,8 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 			return
 		}
 	}
+
+	username = h.accountName(providerID, username)
 
 	h.logger.Debug("authentication successful, checking admin group membership",
 		"provider_id", providerID,
@@ -400,6 +403,25 @@ func (h *LoginHandler) loginProvider(w http.ResponseWriter, r *http.Request, pro
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
+}
+
+// accountName returns the directory account name for a login identifier that
+// authenticated successfully. The AD and FreeIPA connectors bind "user@domain" as
+// "user", so the session must carry "user" or later uid/sAMAccountName lookups fail.
+func (h *LoginHandler) accountName(providerID, username string) string {
+	if strings.Contains(username, "=") {
+		return username
+	}
+	idx := strings.Index(username, "@")
+	if idx <= 0 {
+		return username
+	}
+	h.logger.Info("login identifier normalized to account name",
+		"provider_id", providerID,
+		"entered", username,
+		"username", username[:idx],
+	)
+	return username[:idx]
 }
 
 // shouldEnforceMFAOnLogin checks whether the login should be gated by MFA.

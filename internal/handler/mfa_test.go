@@ -1226,9 +1226,11 @@ func TestShowMFA_MFAPending_NoClient(t *testing.T) {
 }
 
 func TestShowMFA_UpdateSessionMFAError(t *testing.T) {
-	// Email OTP initiated successfully, but UpdateSessionMFA fails → flash + redirect.
+	// Email OTP sent, but UpdateSessionMFA fails → flash + redirect.
 	env := setupMFAHandlerTest(t)
 	env.setupEmailOTPProvider(t, "otp-show-updsess")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+	env.setupFakeSMTP(t)
 
 	mockStore := &mockUpdateSessionMFAErrStore{DB: env.db, err: fmt.Errorf("db error")}
 	h := env.newHandlerWithStore(t, mockStore)
@@ -1339,9 +1341,11 @@ func TestResendOTP_DuoProvider(t *testing.T) {
 }
 
 func TestResendOTP_UpdateSessionMFAFails(t *testing.T) {
-	// Email OTP Initiate succeeds, but UpdateSessionMFA fails → flash + redirect to errorRedirect.
+	// Email OTP sent, but UpdateSessionMFA fails → flash + redirect to errorRedirect.
 	env := setupMFAHandlerTest(t)
 	env.setupEmailOTPProvider(t, "otp-resend-updsess")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+	env.setupFakeSMTP(t)
 
 	mockStore := &mockUpdateSessionMFAErrStore{DB: env.db, err: fmt.Errorf("db error")}
 	h := env.newHandlerWithStore(t, mockStore)
@@ -1830,5 +1834,153 @@ func TestShowMFA_EmailOTP_ReuseExistingState(t *testing.T) {
 	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 (OTP reuse re-render), got %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// setupFakeSMTP saves an enabled SMTP config pointing at a local fake server.
+func (env *mfaHandlerTestEnv) setupFakeSMTP(t *testing.T) {
+	t.Helper()
+	addr, stop := fakeSMTPServerHandler(t)
+	t.Cleanup(stop)
+	host, port, _ := net.SplitHostPort(addr)
+	smtpJSON, _ := json.Marshal(map[string]any{
+		"host":         host,
+		"port":         port,
+		"from_address": "from@example.com",
+		"enabled":      true,
+	})
+	if err := env.db.SaveSMTPConfig(context.Background(), &db.SMTPConfig{ConfigJSON: string(smtpJSON)}); err != nil {
+		t.Fatalf("saving SMTP config: %v", err)
+	}
+}
+
+// assertLoginRedirectWithFlash checks that a login-gated MFA failure ended the old
+// session and sent the user to /login with the message on a new flash session.
+func assertLoginRedirectWithFlash(t *testing.T, env *mfaHandlerTestEnv, rec *httptest.ResponseRecorder, oldSessID, wantMsg string) {
+	t.Helper()
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/login" {
+		t.Errorf("Location = %q, want /login", loc)
+	}
+	if _, err := env.db.GetSession(context.Background(), oldSessID); err == nil {
+		t.Error("expected the MFA-pending session to be deleted")
+	}
+
+	var flashSess *db.Session
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "passport_session" && c.Value != "" {
+			s, err := env.db.GetSession(context.Background(), c.Value)
+			if err != nil {
+				t.Fatalf("loading flash session: %v", err)
+			}
+			flashSess = s
+		}
+	}
+	if flashSess == nil {
+		t.Fatal("expected a new flash session cookie")
+	}
+	if flashSess.UserType != "flash" || flashSess.Username != "" {
+		t.Errorf("flash session = {type %q, user %q}, want {flash, \"\"}", flashSess.UserType, flashSess.Username)
+	}
+	if !strings.Contains(flashSess.FlashJSON, wantMsg) {
+		t.Errorf("flash = %q, want it to contain %q", flashSess.FlashJSON, wantMsg)
+	}
+}
+
+// A login-gated session whose email can't be resolved used to save the OTP state,
+// bounce /dashboard -> /mfa, and render the code form with no email ever sent.
+func TestShowMFA_EmailOTP_LoginPending_NoEmail_EndsSession(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-pending-noemail")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockSearchFailProvider{
+		mockProvider: &mockProvider{id: "corp-ad"},
+		searchErr:    errors.New("no such user"),
+	})
+
+	cookies := env.createMFAPendingSession(t, "provider", "corp-ad", "jdoe@corp.example.com")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+
+	assertLoginRedirectWithFlash(t, env, rec, sessID, "Could not determine your email address")
+}
+
+func TestShowMFA_EmailOTP_LoginPending_SendFails_EndsSession(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-pending-sendfail")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+
+	cookies := env.createMFAPendingSession(t, "provider", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+
+	assertLoginRedirectWithFlash(t, env, rec, sessID, "Failed to send verification code")
+}
+
+func TestShowMFA_EmailOTP_SendFails_SavesNoState(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-nostate")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+
+	cookies := env.createSession(t, "provider", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, env.handler.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+	if loc := rec.Header().Get("Location"); loc != "/dashboard" {
+		t.Errorf("Location = %q, want /dashboard", loc)
+	}
+
+	sess, err := env.db.GetSession(context.Background(), sessID)
+	if err != nil {
+		t.Fatalf("loading session: %v", err)
+	}
+	if sess.MFAPending || sess.MFAState != "" {
+		t.Errorf("unsent code left MFA state behind: pending=%v state=%q", sess.MFAPending, sess.MFAState)
+	}
+}
+
+func TestShowMFA_EmailOTP_LoginPending_UpdateSessionMFAError_EndsSession(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-pending-updsess")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+	env.setupFakeSMTP(t)
+	h := env.newHandlerWithStore(t, &mockUpdateSessionMFAErrStore{DB: env.db, err: errors.New("db error")})
+
+	cookies := env.createMFAPendingSession(t, "provider", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, h.ShowMFA, http.MethodGet, "/mfa", cookies, "")
+
+	assertLoginRedirectWithFlash(t, env, rec, sessID, "Internal error")
+}
+
+func TestResendOTP_LoginPending_SendFails_EndsSession(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-resend-pending-sendfail")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockProvider{id: "corp-ad"})
+
+	cookies := env.createMFAPendingSession(t, "provider", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, env.handler.ResendOTP, http.MethodPost, "/mfa/resend-otp", cookies, "")
+
+	assertLoginRedirectWithFlash(t, env, rec, sessID, "Failed to send verification code")
+}
+
+func TestResendOTP_ResetPending_NoEmail_KeepsSession(t *testing.T) {
+	env := setupMFAHandlerTest(t)
+	env.setupEmailOTPProvider(t, "otp-resend-reset-noemail")
+	env.setupIDPWithMockProvider(t, "corp-ad", &mockSearchFailProvider{
+		mockProvider: &mockProvider{id: "corp-ad"},
+		searchErr:    errors.New("no such user"),
+	})
+
+	cookies := env.createMFAPendingSession(t, "reset", "corp-ad", "jdoe")
+	sessID := env.getSessionID(t, cookies)
+	rec := env.serveWithSession(t, env.handler.ResendOTP, http.MethodPost, "/mfa/resend-otp", cookies, "")
+
+	if loc := rec.Header().Get("Location"); loc != "/forgot-password" {
+		t.Errorf("Location = %q, want /forgot-password", loc)
+	}
+	if _, err := env.db.GetSession(context.Background(), sessID); err != nil {
+		t.Errorf("reset session should be kept: %v", err)
 	}
 }

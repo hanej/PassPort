@@ -340,7 +340,12 @@ func (sm *SessionManager) SetFlash(w http.ResponseWriter, r *http.Request, categ
 			return
 		}
 	}
+	sm.SetFlashForSession(r.Context(), sess.ID, category, message)
+}
 
+// SetFlashForSession stores a flash message on a specific session. Use it for a
+// session created during the current request, which SetFlash cannot see.
+func (sm *SessionManager) SetFlashForSession(ctx context.Context, sessionID, category, message string) {
 	fd := flashData{Category: category, Message: message}
 	b, err := json.Marshal(fd)
 	if err != nil {
@@ -350,9 +355,9 @@ func (sm *SessionManager) SetFlash(w http.ResponseWriter, r *http.Request, categ
 		return
 	}
 
-	if err := sm.store.UpdateSessionFlash(r.Context(), sess.ID, string(b)); err != nil {
+	if err := sm.store.UpdateSessionFlash(ctx, sessionID, string(b)); err != nil {
 		sm.logger.Error("failed to set flash",
-			slog.String("session_id", sess.ID),
+			slog.String("session_id", sessionID),
 			slog.String("error", err.Error()),
 		)
 	}

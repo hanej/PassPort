@@ -231,41 +231,39 @@ func (h *MFAHandler) ShowMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.UpdateSessionMFA(r.Context(), sess.ID, true, state); err != nil {
-		h.logger.Error("failed to save MFA state", "error", err)
-		h.sessions.SetFlash(w, r, "error", "Internal error. Please try again.")
-		http.Redirect(w, r, errorRedirect, http.StatusFound)
-		return
-	}
-
-	switch mfa.ProviderType(record.ProviderType) {
-	case mfa.ProviderTypeEmail:
-		otpClient := client.(*emailotp.Client)
-		otpCode := emailotp.ExtractCode(state)
-
+	// Send the code before saving state: a saved but unsent code would render the
+	// OTP form on the next GET /mfa with nothing in the user's inbox.
+	otpClient, isEmailOTP := client.(*emailotp.Client)
+	if isEmailOTP {
 		userEmail, err := h.resolveUserEmail(r, sess.ProviderID, sess.Username)
 		if err != nil {
 			h.logger.Error("failed to resolve user email for OTP", "error", err, "username", sess.Username)
-			h.sessions.SetFlash(w, r, "error", "Could not determine your email address. Please contact your administrator.")
-			http.Redirect(w, r, errorRedirect, http.StatusFound)
+			h.failMFAStart(w, r, sess, errorRedirect, "Could not determine your email address. Please contact your administrator.")
 			return
 		}
 
-		if err := h.sendOTPEmail(r, otpClient, userEmail, otpCode); err != nil {
+		if err := h.sendOTPEmail(r, otpClient, userEmail, emailotp.ExtractCode(state)); err != nil {
 			h.logger.Error("failed to send OTP email", "error", err, "username", sess.Username)
-			h.sessions.SetFlash(w, r, "error", "Failed to send verification code. Please try again.")
-			http.Redirect(w, r, errorRedirect, http.StatusFound)
+			h.failMFAStart(w, r, sess, errorRedirect, "Failed to send verification code. Please try again.")
 			return
 		}
-
 		h.logger.Debug("OTP email sent", "username", sess.Username)
-		h.renderOTPForm(w, r, otpClient.TTLMinutes(), "")
-
-	default:
-		// DUO and any future redirect-based providers.
-		h.logger.Debug("redirecting to MFA provider", "type", record.ProviderType, "username", sess.Username)
-		http.Redirect(w, r, authURL, http.StatusFound)
 	}
+
+	if err := h.store.UpdateSessionMFA(r.Context(), sess.ID, true, state); err != nil {
+		h.logger.Error("failed to save MFA state", "error", err)
+		h.failMFAStart(w, r, sess, errorRedirect, "Internal error. Please try again.")
+		return
+	}
+
+	if isEmailOTP {
+		h.renderOTPForm(w, r, otpClient.TTLMinutes(), "")
+		return
+	}
+
+	// DUO and any future redirect-based providers.
+	h.logger.Debug("redirecting to MFA provider", "type", record.ProviderType, "username", sess.Username)
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 // Callback handles the DUO MFA callback after verification.
@@ -431,26 +429,22 @@ func (h *MFAHandler) ResendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.UpdateSessionMFA(r.Context(), sess.ID, true, newState); err != nil {
-		h.logger.Error("failed to update session MFA state on resend", "error", err)
-		h.sessions.SetFlash(w, r, "error", "Internal error. Please try again.")
-		http.Redirect(w, r, errorRedirect, http.StatusFound)
-		return
-	}
-
-	otpCode := emailotp.ExtractCode(newState)
 	userEmail, err := h.resolveUserEmail(r, sess.ProviderID, sess.Username)
 	if err != nil {
 		h.logger.Error("failed to resolve user email for OTP resend", "error", err)
-		h.sessions.SetFlash(w, r, "error", "Could not determine your email address.")
-		http.Redirect(w, r, errorRedirect, http.StatusFound)
+		h.failMFAStart(w, r, sess, errorRedirect, "Could not determine your email address. Please contact your administrator.")
 		return
 	}
 
-	if err := h.sendOTPEmail(r, otpClient, userEmail, otpCode); err != nil {
+	if err := h.sendOTPEmail(r, otpClient, userEmail, emailotp.ExtractCode(newState)); err != nil {
 		h.logger.Error("failed to resend OTP email", "error", err)
-		h.sessions.SetFlash(w, r, "error", "Failed to send verification code. Please try again.")
-		http.Redirect(w, r, errorRedirect, http.StatusFound)
+		h.failMFAStart(w, r, sess, errorRedirect, "Failed to send verification code. Please try again.")
+		return
+	}
+
+	if err := h.store.UpdateSessionMFA(r.Context(), sess.ID, true, newState); err != nil {
+		h.logger.Error("failed to update session MFA state on resend", "error", err)
+		h.failMFAStart(w, r, sess, errorRedirect, "Internal error. Please try again.")
 		return
 	}
 
@@ -481,6 +475,25 @@ func (h *MFAHandler) completeMFA(w http.ResponseWriter, r *http.Request, sess *d
 		h.sessions.SetFlash(w, r, "success", "Identity verified. You may now change your password.")
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// failMFAStart reports a failure to start MFA. A session with MFA pending can't be
+// sent to errorRedirect (RequireMFA bounces it back to /mfa), so it is ended instead.
+func (h *MFAHandler) failMFAStart(w http.ResponseWriter, r *http.Request, sess *db.Session, errorRedirect, message string) {
+	if sess.UserType == "reset" || !sess.MFAPending {
+		h.sessions.SetFlash(w, r, "error", message)
+		http.Redirect(w, r, errorRedirect, http.StatusFound)
+		return
+	}
+
+	h.sessions.DestroySession(w, r)
+	flashID, err := h.sessions.CreateSession(w, r, "flash", "", "", false, false)
+	if err != nil {
+		h.logger.Warn("failed to create flash session after MFA failure", "error", err)
+	} else {
+		h.sessions.SetFlashForSession(r.Context(), flashID, "error", message)
+	}
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 // postMFARedirect returns the URL to redirect to after successful MFA.
