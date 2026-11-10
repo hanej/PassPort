@@ -6,6 +6,18 @@ All notable changes to PassPort are documented in this file.
 
 ## [Unreleased]
 
+### Security
+- **Go 1.26.10 minimum** — The `go` directive is raised from 1.26.7 to 1.26.10, which fixes GO-2026-6809 (`crypto/x509` did not distrust compromised intermediate certificates). Unlike earlier advisories this one was reachable: LDAP `StartTLS` in `idp.dialLDAP` verifies the directory's certificate chain through `x509.Certificate.Verify`. CI and the Docker build (`golang:1.26-alpine`) pick up the patched toolchain automatically. `govulncheck ./...` reports no vulnerabilities affecting the code; GO-2026-5932 (`x/crypto/openpgp`, unreachable, no tagged fix) remains the only module-level advisory.
+
+### Fixed
+- **Signing in with an email address left email-MFA users waiting for a code that never came** — The AD and FreeIPA connectors drop an `@domain` suffix before checking the password, so `jdoe@corp.example.com` signed in as `jdoe`, but the session kept the typed value. The email-OTP step then looked up `uid`/`sAMAccountName` = `jdoe@corp.example.com`, found no one, and redirected to the dashboard, which sent the still-pending session straight back to `/mfa`. Because the code had already been saved, the OTP form was shown with nothing sent. The session, audit success entry, admin-group check, self-mapping and correlation now use the directory account name; failed-login audit entries still record what the user typed.
+- **An OTP that failed to send could still show the code-entry form** — The MFA page and "resend code" now look up the address and send the email before saving the code, so a failed lookup or SMTP error never leaves a usable-looking form behind. When MFA is pending, a failure ends the session and returns the user to the login page with the reason, instead of bouncing between `/dashboard` and `/mfa` (which could also resend the email on every pass). Forgot-password sessions keep their existing behaviour.
+- **"Password reset successfully" was never shown after a forgot-password reset** — The message was written to the reset session that had just been deleted, so the login page showed nothing. It is now stored on the new session the browser receives.
+- **FreeIPA password policy rejections showed a generic error** — A FreeIPA rejection such as `Constraint Violation: Password reuse not permitted` reached the user as "please try again or contact your administrator", because only the AD connector classified policy failures. FreeIPA constraint violations are now reported as policy errors and the directory's reason is shown, e.g. "the new password was rejected by the directory: Password reuse not permitted." The reason is only displayed when it is short and contains no DN; otherwise the generic policy message is used. AD is unchanged, since it reports complexity, history and minimum age with the same code.
+
+### Dependencies
+- Go modules: `go-chi/chi/v5` v5.3.2 → v5.5.0, `go-ldap/ldap/v3` v3.4.14 → v3.4.15, `yuin/goldmark` v1.8.6 → v1.8.7, `golang.org/x/crypto` v0.57.0 → v0.58.0, `modernc.org/sqlite` v1.59.0 → v1.62.0, plus indirect updates (`golang.org/x/sys`, `modernc.org/libc`, `goccy/go-json`, `dustin/go-humanize`, `ncruces/go-strftime`).
+
 ---
 
 ## [v1.2.3] - 2026-09-24
