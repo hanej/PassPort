@@ -285,6 +285,21 @@ func TestPasswordChangeMessage(t *testing.T) {
 			want: "the new password does not meet your organization's complexity, history, or minimum age requirements.",
 		},
 		{
+			name: "policy with directory reason",
+			err:  &idp.PasswordPolicyError{Reason: "Password reuse not permitted", Err: errors.New(leaky)},
+			want: "the new password was rejected by the directory: Password reuse not permitted.",
+		},
+		{
+			name: "policy reason containing a DN falls back",
+			err:  &idp.PasswordPolicyError{Reason: "rejected for uid=jdoe,DC=corp,DC=example", Err: errors.New(leaky)},
+			want: "the new password does not meet your organization's complexity, history, or minimum age requirements.",
+		},
+		{
+			name: "overlong policy reason falls back",
+			err:  &idp.PasswordPolicyError{Reason: strings.Repeat("x", 121), Err: errors.New(leaky)},
+			want: "the new password does not meet your organization's complexity, history, or minimum age requirements.",
+		},
+		{
 			name: "wrong current password",
 			err:  errors.New("current password is incorrect"),
 			want: "current password is incorrect.",

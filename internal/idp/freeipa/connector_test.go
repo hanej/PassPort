@@ -2,6 +2,7 @@ package freeipa
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -718,6 +719,31 @@ func TestChangePassword_PasswordModifyError(t *testing.T) {
 	err := c.ChangePassword(context.Background(), "jdoe", "old", "new")
 	if err == nil {
 		t.Fatal("expected PasswordModify error, got nil")
+	}
+	if errors.Is(err, idp.ErrPasswordPolicy) {
+		t.Errorf("non-LDAP error must not be classified as a policy violation: %v", err)
+	}
+}
+
+func TestChangePassword_ConstraintViolationIsPolicyError(t *testing.T) {
+	mock := &mockLDAPConn{
+		bindFunc: func(_, _ string) error { return nil },
+		passwordModifyFunc: func(req *ldap.PasswordModifyRequest) (*ldap.PasswordModifyResult, error) {
+			return nil, ldap.NewError(ldap.LDAPResultConstraintViolation, errors.New("Password reuse not permitted"))
+		},
+	}
+	c := newTestConnector(mock)
+	err := c.ChangePassword(context.Background(), "uid=jdoe,cn=users,dc=example,dc=com", "old", "new")
+
+	if !errors.Is(err, idp.ErrPasswordPolicy) {
+		t.Fatalf("expected ErrPasswordPolicy, got: %v", err)
+	}
+	var pe *idp.PasswordPolicyError
+	if !errors.As(err, &pe) || pe.Reason != "Password reuse not permitted" {
+		t.Fatalf("expected PasswordPolicyError with the directory reason, got: %#v", err)
+	}
+	if !ldap.IsErrorWithCode(err, ldap.LDAPResultConstraintViolation) {
+		t.Errorf("underlying LDAP error should stay reachable for logs/audit: %v", err)
 	}
 }
 

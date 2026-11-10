@@ -2,6 +2,7 @@ package freeipa
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -136,7 +137,12 @@ func (c *Connector) ChangePassword(ctx context.Context, user, oldPassword, newPa
 	// Issue the password modify extended operation.
 	passReq := ldap.NewPasswordModifyRequest(userDN, oldPassword, newPassword)
 	if _, err := conn.PasswordModify(passReq); err != nil {
-		return fmt.Errorf("changing password for %q: %w", user, err)
+		wrapped := fmt.Errorf("changing password for %q: %w", user, err)
+		var ldapErr *ldap.Error
+		if errors.As(err, &ldapErr) && ldapErr.ResultCode == ldap.LDAPResultConstraintViolation && ldapErr.Err != nil {
+			return &idp.PasswordPolicyError{Reason: ldapErr.Err.Error(), Err: wrapped}
+		}
+		return wrapped
 	}
 
 	c.logger.Debug("password change successful", "user", user)

@@ -385,6 +385,9 @@ func (h *DashboardHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 func passwordChangeMessage(err error) string {
 	switch {
 	case errors.Is(err, idp.ErrPasswordPolicy):
+		if reason := policyReason(err); reason != "" {
+			return "the new password was rejected by the directory: " + reason + "."
+		}
 		return "the new password does not meet your organization's complexity, history, or minimum age requirements."
 	case strings.Contains(err.Error(), "current password is incorrect"):
 		return "current password is incorrect."
@@ -395,6 +398,20 @@ func passwordChangeMessage(err error) string {
 	default:
 		return "please try again or contact your administrator."
 	}
+}
+
+// policyReason returns the directory's stated policy rule, or "" if it is absent or
+// looks like it could carry directory detail (a DN, or an unexpectedly long message).
+func policyReason(err error) string {
+	var pe *idp.PasswordPolicyError
+	if !errors.As(err, &pe) {
+		return ""
+	}
+	reason := strings.TrimRight(strings.TrimSpace(pe.Reason), ".")
+	if reason == "" || len(reason) > 120 || strings.ContainsAny(reason, "=\n\r") {
+		return ""
+	}
+	return reason
 }
 
 // PublicIDPStatus returns only online/offline for an IDP. No error details are

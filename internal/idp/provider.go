@@ -34,6 +34,21 @@ var (
 	ErrPasswordPolicy = errors.New("password does not meet complexity, history, or minimum age requirements")
 )
 
+// PasswordPolicyError is a policy rejection whose directory names the rule that
+// failed (e.g. FreeIPA's "Password reuse not permitted"). It matches ErrPasswordPolicy.
+type PasswordPolicyError struct {
+	Reason string // the directory's diagnostic message
+	Err    error
+}
+
+func (e *PasswordPolicyError) Error() string {
+	return fmt.Sprintf("%v: %v", ErrPasswordPolicy, e.Err)
+}
+
+func (e *PasswordPolicyError) Is(target error) bool { return target == ErrPasswordPolicy }
+
+func (e *PasswordPolicyError) Unwrap() error { return e.Err }
+
 // ProviderType identifies the type of identity provider.
 type ProviderType string
 
