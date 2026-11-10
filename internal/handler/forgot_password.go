@@ -459,7 +459,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 
 	// We need a new temporary session to hold the flash message since
 	// DestroySession cleared the cookie. Create a short-lived one.
-	_, err = h.sessions.CreateSession(w, r, "flash", "", "", false, false)
+	flashID, err := h.sessions.CreateSession(w, r, "flash", "", "", false, false)
 	if err != nil {
 		// Even if we can't set the flash, the reset succeeded.
 		h.logger.Warn("failed to create flash session after reset", "error", err)
@@ -467,7 +467,7 @@ func (h *ForgotPasswordHandler) ResetPassword(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.sessions.SetFlash(w, r, "success", "Password reset successfully. You may now log in with your new password.")
+	h.sessions.SetFlashForSession(r.Context(), flashID, "success", "Password reset successfully. You may now log in with your new password.")
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 

@@ -505,6 +505,24 @@ func TestResetPassword_Success(t *testing.T) {
 	if loc := rec.Header().Get("Location"); loc != "/login" {
 		t.Errorf("expected redirect to /login, got %s", loc)
 	}
+
+	// The success flash must land on the new flash session the browser now holds.
+	var flashSess *db.Session
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "passport_session" && c.Value != "" {
+			s, err := env.db.GetSession(context.Background(), c.Value)
+			if err != nil {
+				t.Fatalf("loading flash session: %v", err)
+			}
+			flashSess = s
+		}
+	}
+	if flashSess == nil {
+		t.Fatal("expected a new flash session cookie")
+	}
+	if !strings.Contains(flashSess.FlashJSON, "Password reset successfully") {
+		t.Errorf("flash = %q, want the reset success message", flashSess.FlashJSON)
+	}
 }
 
 // mockForgotPwErrStore wraps *db.DB and forces ListEnabledIDPs to fail.
