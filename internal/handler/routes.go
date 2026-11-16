@@ -47,6 +47,7 @@ type RouterConfig struct {
 	AdminAudit          *AdminAuditHandler
 	AdminMFA            *AdminMFAHandler
 	AdminEmailTemplates *AdminEmailTemplatesHandler
+	AdminEmailImages    *AdminEmailImagesHandler
 	AdminExpiration     *AdminExpirationHandler
 	AdminBranding       *AdminBrandingHandler
 	AdminMigrate        *AdminMigrateHandler
@@ -244,6 +245,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 						// Email templates
 						r.Get("/email-templates", cfg.AdminEmailTemplates.List)
+						r.Get("/email-templates/images", cfg.AdminEmailImages.List)
+						r.Post("/email-templates/images", cfg.AdminEmailImages.Upload)
+						r.Post("/email-templates/images/{id}/delete", cfg.AdminEmailImages.Delete)
 						r.Post("/email-templates/preview", cfg.AdminEmailTemplates.Preview)
 						r.Get("/email-templates/{type}/edit", cfg.AdminEmailTemplates.Edit)
 						r.Post("/email-templates/{type}", cfg.AdminEmailTemplates.Save)

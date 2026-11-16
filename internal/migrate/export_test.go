@@ -2483,3 +2483,64 @@ func TestExpirationConfig_DaysAfterRoundTrip(t *testing.T) {
 		t.Errorf("restored DaysAfterExpiration = %d, want -1", restored.DaysAfterExpiration)
 	}
 }
+
+func TestEmailImages_ExportImportRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	cryptoSvc := newCrypto(t)
+
+	if err := src.CreateEmailImage(ctx, &db.EmailImage{
+		Name: "Logo", Filename: "0123abcd.png", ContentType: "image/png", SizeBytes: 42, Width: 10, Height: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := BuildExport(ctx, src, cryptoSvc)
+	if err != nil {
+		t.Fatalf("BuildExport: %v", err)
+	}
+	if len(data.EmailImages) != 1 || data.EmailImages[0].Filename != "0123abcd.png" {
+		t.Fatalf("expected image metadata in export, got %+v", data.EmailImages)
+	}
+
+	// A filename that could escape the image directory must never be imported.
+	data.EmailImages = append(data.EmailImages, ExportEmailImage{Name: "evil", Filename: "../evil.png", ContentType: "image/png"})
+
+	dst := openTestDB(t)
+	result, err := RunImport(ctx, dst, cryptoSvc, data, ImportSections{Templates: true})
+	if err != nil {
+		t.Fatalf("RunImport: %v", err)
+	}
+	if result.EmailImages != 1 || len(result.Errors) != 1 {
+		t.Errorf("expected 1 image imported and 1 error, got %d / %v", result.EmailImages, result.Errors)
+	}
+
+	images, err := dst.ListEmailImages(ctx)
+	if err != nil || len(images) != 1 {
+		t.Fatalf("expected 1 image after import, got %d (%v)", len(images), err)
+	}
+	if got := images[0]; got.Name != "Logo" || got.Width != 10 || got.Height != 5 || got.SizeBytes != 42 {
+		t.Errorf("unexpected imported image: %+v", got)
+	}
+}
+
+func TestEmailTemplates_PriorityRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	cryptoSvc := newCrypto(t)
+	if err := src.SaveEmailTemplate(ctx, &db.EmailTemplate{TemplateType: "password_changed", Subject: "s", BodyHTML: "b", Priority: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := BuildExport(ctx, src, cryptoSvc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := openTestDB(t)
+	if _, err := RunImport(ctx, dst, cryptoSvc, data, ImportSections{Templates: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dst.GetEmailTemplate(ctx, "password_changed")
+	if err != nil || got.Priority != "high" {
+		t.Fatalf("expected high priority after import, got %+v (%v)", got, err)
+	}
+}

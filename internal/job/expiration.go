@@ -332,7 +332,7 @@ func (n *PasswordExpirationNotifier) runForIDP(ctx context.Context, idpID string
 		if testRecipient != "" {
 			recipient = testRecipient
 		}
-		if err := email.SendHTML(emailCfg, recipient, renderedSubject, renderedBody); err != nil {
+		if err := email.SendHTMLWithPriority(emailCfg, recipient, renderedSubject, renderedBody, tmpl.Priority); err != nil {
 			n.logger.Warn("failed to send expiration notification", "username", user.Username, "email", recipient, "error", err)
 			continue
 		}
@@ -482,7 +482,7 @@ func (n *PasswordExpirationNotifier) sendExpiredNotifications(
 		if testRecipient != "" {
 			recipient = testRecipient
 		}
-		if err := email.SendHTML(emailCfg, recipient, renderedSubject, renderedBody); err != nil {
+		if err := email.SendHTMLWithPriority(emailCfg, recipient, renderedSubject, renderedBody, tmpl.Priority); err != nil {
 			n.logger.Warn("failed to send expired notification", "username", user.Username, "email", recipient, "error", err)
 			continue
 		}

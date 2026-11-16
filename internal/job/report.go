@@ -174,13 +174,13 @@ func (rs *ReportScheduler) RunReportForIDP(ctx context.Context, idpID, reportTyp
 	tmplType := reportTemplateType(reportType)
 	tableHTML := renderReportTable(users, reportType == db.ReportTypeExpiration)
 
-	rendered, subject, err := rs.renderReport(ctx, idpID, record.FriendlyName, tmplType, generatedDate, tableHTML, len(users))
+	rendered, subject, priority, err := rs.renderReport(ctx, idpID, record.FriendlyName, tmplType, generatedDate, tableHTML, len(users))
 	if err != nil {
 		return err
 	}
 
 	for _, recipient := range recipients {
-		if err := email.SendHTML(emailCfg, recipient, subject, rendered); err != nil {
+		if err := email.SendHTMLWithPriority(emailCfg, recipient, subject, rendered, priority); err != nil {
 			rs.logger.Warn("failed to send report email", "recipient", recipient, "error", err)
 		}
 	}
@@ -221,7 +221,7 @@ func (rs *ReportScheduler) PreviewForIDP(ctx context.Context, idpID, reportType 
 	generatedDate := time.Now().Local().Format("Jan 2, 2006 3:04 PM MST")
 	tableHTML := renderReportTable(users, reportType == db.ReportTypeExpiration)
 
-	rendered, _, err := rs.renderReport(ctx, idpID, record.FriendlyName, reportTemplateType(reportType), generatedDate, tableHTML, len(users))
+	rendered, _, _, err := rs.renderReport(ctx, idpID, record.FriendlyName, reportTemplateType(reportType), generatedDate, tableHTML, len(users))
 	if err != nil {
 		return nil, err
 	}
@@ -322,11 +322,11 @@ func (rs *ReportScheduler) gatherUsers(ctx context.Context, idpID, reportType st
 	return users, record, nil
 }
 
-// renderReport renders a report email template, returning (html, subject, error).
-func (rs *ReportScheduler) renderReport(ctx context.Context, idpID, providerName, templateType, generatedDate, tableHTML string, accountCount int) (string, string, error) {
+// renderReport renders a report email template, returning (html, subject, priority, error).
+func (rs *ReportScheduler) renderReport(ctx context.Context, idpID, providerName, templateType, generatedDate, tableHTML string, accountCount int) (string, string, string, error) {
 	tmpl, err := rs.loadReportTemplate(ctx, idpID, templateType)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	data := map[string]any{
@@ -338,19 +338,19 @@ func (rs *ReportScheduler) renderReport(ctx context.Context, idpID, providerName
 
 	t, err := template.New("report").Parse(tmpl.BodyHTML)
 	if err != nil {
-		return "", "", fmt.Errorf("parsing report template: %w", err)
+		return "", "", "", fmt.Errorf("parsing report template: %w", err)
 	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, data); err != nil {
-		return "", "", fmt.Errorf("executing report template: %w", err)
+		return "", "", "", fmt.Errorf("executing report template: %w", err)
 	}
 
 	renderedSubject, err := executeTemplate(tmpl.Subject, data)
 	if err != nil {
-		return "", "", fmt.Errorf("rendering report subject: %w", err)
+		return "", "", "", fmt.Errorf("rendering report subject: %w", err)
 	}
 
-	return buf.String(), renderedSubject, nil
+	return buf.String(), renderedSubject, tmpl.Priority, nil
 }
 
 func (rs *ReportScheduler) loadReportTemplate(ctx context.Context, idpID, templateType string) (*db.EmailTemplate, error) {

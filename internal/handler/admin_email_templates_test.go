@@ -38,6 +38,7 @@ func stubEmailTemplatesRenderer(t *testing.T) *Renderer {
 	pages := make(map[string]*template.Template)
 	pages["admin_email_templates.html"] = template.Must(template.New("admin_email_templates.html").Funcs(funcMap).Parse(`{{define "base"}}email templates list{{end}}`))
 	pages["admin_email_template_form.html"] = template.Must(template.New("admin_email_template_form.html").Funcs(funcMap).Parse(`{{define "base"}}email template form{{end}}`))
+	pages["admin_email_images.html"] = template.Must(template.New("admin_email_images.html").Funcs(funcMap).Parse(`{{define "base"}}email images{{range .Data.Images}} {{.Name}}:{{range .UsedBy}}[{{.}}]{{end}}{{end}}{{end}}`))
 	pages["error.html"] = template.Must(template.New("error.html").Funcs(funcMap).Parse(`{{define "base"}}error page{{end}}`))
 	return &Renderer{pages: pages, logger: logger}
 }
@@ -939,5 +940,31 @@ func TestAdminEmailTemplatesEdit_PerIDPFallbacks(t *testing.T) {
 				t.Errorf("expected status 200, got %d; body: %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestAdminEmailTemplatesSave_Priority(t *testing.T) {
+	env := setupEmailTemplatesTest(t)
+	cookies := env.createAdminSession(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct{ in, want string }{{"high", "high"}, {"low", "low"}, {"bogus", "normal"}, {"", "normal"}} {
+		form := url.Values{}
+		form.Set("subject", "S")
+		form.Set("body_html", "<p>B</p>")
+		form.Set("priority", tc.in)
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			env.handler.Save(w, withChiURLParam(r, "type", "smtp_test"))
+		})
+		if rec := env.serveWithAdminSession(t, handler, http.MethodPost, "/admin/email-templates/smtp_test", cookies, form.Encode()); rec.Code != http.StatusFound {
+			t.Fatalf("priority %q: expected redirect, got %d", tc.in, rec.Code)
+		}
+		tmpl, err := env.db.GetEmailTemplate(ctx, "smtp_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tmpl.Priority != tc.want {
+			t.Errorf("priority %q: stored %q, want %q", tc.in, tmpl.Priority, tc.want)
+		}
 	}
 }

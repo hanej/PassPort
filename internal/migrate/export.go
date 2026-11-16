@@ -11,6 +11,7 @@ import (
 
 	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
+	"github.com/hanej/passport/internal/email"
 	"github.com/hanej/passport/internal/mfa"
 )
 
@@ -31,6 +32,7 @@ type ExportData struct {
 	MFALoginRequired     bool                       `json:"mfa_login_required"`
 	Branding             *db.BrandingConfig         `json:"branding"`
 	EmailTemplates       []ExportEmailTemplate      `json:"email_templates"`
+	EmailImages          []ExportEmailImage         `json:"email_images,omitempty"`
 }
 
 // ExportLocalAdmin represents a local admin account in the export.
@@ -167,6 +169,18 @@ type ExportEmailTemplate struct {
 	TemplateType string `json:"template_type"`
 	Subject      string `json:"subject"`
 	BodyHTML     string `json:"body_html"`
+	Priority     string `json:"priority,omitempty"`
+}
+
+// ExportEmailImage is the metadata for an email image library entry. The image
+// file itself travels in the archive under uploads/email-images/.
+type ExportEmailImage struct {
+	Name        string `json:"name"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
 }
 
 // ImportResult tracks what was imported.
@@ -180,6 +194,7 @@ type ImportResult struct {
 	MFAProviders   int
 	Branding       bool
 	EmailTemplates int
+	EmailImages    int
 	ReportConfigs  int
 	UploadFiles    int
 	Errors         []string
@@ -570,6 +585,23 @@ func buildCommon(ctx context.Context, store db.Store, data *ExportData) error {
 			TemplateType: t.TemplateType,
 			Subject:      t.Subject,
 			BodyHTML:     t.BodyHTML,
+			Priority:     t.Priority,
+		})
+	}
+
+	// 10. Email image library metadata
+	images, err := store.ListEmailImages(ctx)
+	if err != nil {
+		return fmt.Errorf("list email images: %w", err)
+	}
+	for _, img := range images {
+		data.EmailImages = append(data.EmailImages, ExportEmailImage{
+			Name:        img.Name,
+			Filename:    img.Filename,
+			ContentType: img.ContentType,
+			SizeBytes:   img.SizeBytes,
+			Width:       img.Width,
+			Height:      img.Height,
 		})
 	}
 
@@ -988,12 +1020,33 @@ func RunImport(ctx context.Context, store db.Store, cryptoSvc *crypto.Service, d
 				TemplateType: et.TemplateType,
 				Subject:      et.Subject,
 				BodyHTML:     et.BodyHTML,
+				Priority:     et.Priority,
 			}
 			if err := store.SaveEmailTemplate(ctx, t); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("Failed to save email template %s: %v", et.TemplateType, err))
 				continue
 			}
 			result.EmailTemplates++
+		}
+
+		for _, ei := range data.EmailImages {
+			if !email.IsInlineImageFilename(ei.Filename) {
+				result.Errors = append(result.Errors, fmt.Sprintf("Skipped email image with invalid filename %q", ei.Filename))
+				continue
+			}
+			img := &db.EmailImage{
+				Name:        ei.Name,
+				Filename:    ei.Filename,
+				ContentType: ei.ContentType,
+				SizeBytes:   ei.SizeBytes,
+				Width:       ei.Width,
+				Height:      ei.Height,
+			}
+			if err := store.UpsertEmailImageByFilename(ctx, img); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("Failed to save email image %s: %v", ei.Name, err))
+				continue
+			}
+			result.EmailImages++
 		}
 	}
 

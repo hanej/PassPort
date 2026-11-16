@@ -1,0 +1,80 @@
+{{define "title"}}Email Image Library - Admin - {{(branding).AppTitle}}{{end}}
+
+{{define "admin_content"}}
+<div class="mb-3">
+    <h3><i class="bi bi-file-earmark-text me-2"></i>Email Templates</h3>
+    <p class="text-muted">Upload images once and embed them in any email template.</p>
+</div>
+
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item"><a class="nav-link" href="/admin/email-templates"><i class="bi bi-list-ul me-1"></i>Templates</a></li>
+    <li class="nav-item"><a class="nav-link active" aria-current="page" href="/admin/email-templates/images"><i class="bi bi-images me-1"></i>Image Library</a></li>
+</ul>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h6 class="mb-0"><i class="bi bi-upload me-2"></i>Upload Image</h6>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="/admin/email-templates/images" enctype="multipart/form-data" class="row g-3 align-items-end">
+            {{.CSRFField}}
+            <div class="col-md-5">
+                <label for="image_file" class="form-label">Image file</label>
+                <input type="file" class="form-control" id="image_file" name="image_file"
+                       accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif" required>
+            </div>
+            <div class="col-md-5">
+                <label for="name" class="form-label">Name <span class="text-muted small">(optional)</span></label>
+                <input type="text" class="form-control" id="name" name="name" maxlength="200" placeholder="Defaults to the file name">
+            </div>
+            <div class="col-md-2 d-grid">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-upload me-1"></i>Upload</button>
+            </div>
+            <div class="col-12 form-text mt-1">
+                PNG, JPG, or GIF up to {{.Data.MaxSizeMB}} MB. Images are embedded in the email itself, so recipients see them without contacting this server.
+            </div>
+        </form>
+    </div>
+</div>
+
+{{if .Data.Images}}
+<div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-4 g-3">
+    {{range .Data.Images}}
+    <div class="col">
+        <div class="card h-100">
+            <div class="d-flex align-items-center justify-content-center bg-light border-bottom" style="height: 160px;">
+                <img src="{{.URL}}" alt="{{.Name}}" style="max-width: 100%; max-height: 150px; object-fit: contain;">
+            </div>
+            <div class="card-body py-2">
+                <div class="fw-semibold text-truncate" title="{{.Name}}">{{.Name}}</div>
+                <div class="small text-muted">{{.Width}}&times;{{.Height}} &middot; {{.SizeLabel}}</div>
+                <div class="small text-muted">Uploaded {{fmtTime .CreatedAt}}</div>
+                {{if .UsedBy}}
+                <div class="small mt-1"><span class="badge text-bg-secondary">In use</span>
+                    <span class="text-muted">{{range $i, $n := .UsedBy}}{{if $i}}, {{end}}{{$n}}{{end}}</span>
+                </div>
+                {{end}}
+            </div>
+            <div class="card-footer bg-transparent d-flex justify-content-end">
+                <form method="POST" action="/admin/email-templates/images/{{.ID}}/delete"
+                      onsubmit="return confirm('Delete this image from the library?');">
+                    {{$.CSRFField}}
+                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                            {{if .UsedBy}}disabled title="Remove this image from the templates that use it before deleting it"{{else}}title="Delete image"{{end}}>
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="card">
+    <div class="card-body text-center text-muted py-5">
+        <i class="bi bi-images fs-1 d-block mb-2"></i>
+        No images yet. Upload one above, then insert it from any template's editor.
+    </div>
+</div>
+{{end}}
+{{end}}

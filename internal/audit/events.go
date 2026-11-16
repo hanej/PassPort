@@ -31,6 +31,8 @@ const (
 	ActionMFAVerify              = "mfa_verify"
 	ActionEmailTemplateUpdate    = "email_template_update"
 	ActionEmailTemplateReset     = "email_template_reset"
+	ActionEmailImageUpload       = "email_image_upload"
+	ActionEmailImageDelete       = "email_image_delete"
 	ActionExpirationNotification = "expiration_notification"
 	ActionExpiredNotification    = "expired_notification"
 	ActionExpirationConfigUpdate = "expiration_config_update"
@@ -100,6 +102,8 @@ func FilterOptions() []FilterOption {
 		{"Administration", ActionSMTPTest, "Test Email Sent"},
 		{"Administration", ActionEmailTemplateUpdate, "Email Template Updated"},
 		{"Administration", ActionEmailTemplateReset, "Email Template Reset"},
+		{"Administration", ActionEmailImageUpload, "Email Image Uploaded"},
+		{"Administration", ActionEmailImageDelete, "Email Image Deleted"},
 		{"Administration", ActionBrandingUpdate, "Branding Updated"},
 		{"Administration", ActionConfigExport, "Configuration Exported"},
 		{"Administration", ActionConfigImport, "Configuration Imported"},

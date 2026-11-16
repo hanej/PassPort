@@ -30,6 +30,7 @@ type Store interface {
 	SettingsStore
 	MFAStore
 	EmailTemplateStore
+	EmailImageStore
 	ExpirationConfigStore
 	ReportConfigStore
 	Ping(ctx context.Context) error
@@ -402,6 +403,7 @@ type EmailTemplate struct {
 	TemplateType string
 	Subject      string
 	BodyHTML     string
+	Priority     string // "normal", "high", or "low"; "" is treated as normal
 	UpdatedAt    time.Time
 }
 
@@ -411,6 +413,28 @@ type EmailTemplateStore interface {
 	GetEmailTemplate(ctx context.Context, templateType string) (*EmailTemplate, error)
 	SaveEmailTemplate(ctx context.Context, t *EmailTemplate) error
 	DeleteEmailTemplate(ctx context.Context, templateType string) error
+}
+
+// EmailImage is an image in the email template image library. The file lives
+// at uploads/email-images/<Filename>; Name is the admin-facing display name.
+type EmailImage struct {
+	ID          int64
+	Name        string
+	Filename    string
+	ContentType string
+	SizeBytes   int64
+	Width       int
+	Height      int
+	CreatedAt   time.Time
+}
+
+// EmailImageStore manages the email template image library.
+type EmailImageStore interface {
+	ListEmailImages(ctx context.Context) ([]EmailImage, error)
+	GetEmailImage(ctx context.Context, id int64) (*EmailImage, error)
+	CreateEmailImage(ctx context.Context, img *EmailImage) error
+	UpsertEmailImageByFilename(ctx context.Context, img *EmailImage) error
+	DeleteEmailImage(ctx context.Context, id int64) error
 }
 
 // Report type constants.

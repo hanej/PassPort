@@ -310,7 +310,7 @@ func TestSendEmail_PlainError(t *testing.T) {
 		UseTLS:      false,
 		FromAddress: "test@example.com",
 	}
-	err := sendEmail(cfg, SMTPSecrets{}, "to@example.com", "Test Subject", "<p>Test body</p>")
+	err := sendEmail(cfg, SMTPSecrets{}, "to@example.com", "Test Subject", "<p>Test body</p>", "")
 	if err == nil {
 		t.Error("expected error from sendEmail to unreachable host")
 	}
@@ -325,7 +325,7 @@ func TestSendEmail_TLSError(t *testing.T) {
 		UseTLS:      true,
 		FromAddress: "test@example.com",
 	}
-	err := sendEmail(cfg, SMTPSecrets{}, "to@example.com", "Test Subject", "<p>Test body</p>")
+	err := sendEmail(cfg, SMTPSecrets{}, "to@example.com", "Test Subject", "<p>Test body</p>", "")
 	if err == nil {
 		t.Error("expected error from sendEmail with TLS to unreachable host")
 	}

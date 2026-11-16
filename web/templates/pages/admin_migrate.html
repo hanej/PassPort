@@ -74,7 +74,7 @@
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="import_templates" value="1" id="chk_templates" checked>
-                                    <label class="form-check-label" for="chk_templates">Email Templates</label>
+                                    <label class="form-check-label" for="chk_templates">Email Templates &amp; Image Library</label>
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="import_uploads" value="1" id="chk_uploads" checked>
@@ -117,6 +117,7 @@
                 {{if $r.MFAProviders}}<tr><td>MFA Providers</td><td>{{$r.MFAProviders}} imported</td></tr>{{end}}
                 {{if $r.Branding}}<tr><td>Branding</td><td>Imported</td></tr>{{end}}
                 {{if $r.EmailTemplates}}<tr><td>Email Templates</td><td>{{$r.EmailTemplates}} imported</td></tr>{{end}}
+                {{if $r.EmailImages}}<tr><td>Email Images</td><td>{{$r.EmailImages}} imported</td></tr>{{end}}
                 {{if $r.ReportConfigs}}<tr><td>Report Configs</td><td>{{$r.ReportConfigs}} imported</td></tr>{{end}}
                 {{if $r.UploadFiles}}<tr><td>Upload Files</td><td>{{$r.UploadFiles}} restored</td></tr>{{end}}
             </tbody>

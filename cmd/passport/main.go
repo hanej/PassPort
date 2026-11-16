@@ -32,6 +32,7 @@ import (
 	"github.com/hanej/passport/internal/config"
 	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
+	"github.com/hanej/passport/internal/email"
 	"github.com/hanej/passport/internal/handler"
 	"github.com/hanej/passport/internal/idp"
 	"github.com/hanej/passport/internal/idp/correlation"
@@ -382,6 +383,9 @@ func main() {
 	linkHandler := handler.NewLinkHandler(database, sessions, registry, renderer, auditLogger, logger)
 	bootstrapHandler := handler.NewBootstrapHandler(database, sessions, renderer, auditLogger, policy, logger)
 	uploadsDir := filepath.Join(filepath.Dir(cfg.Database.Path), "uploads")
+	emailImagesDir := filepath.Join(uploadsDir, "email-images")
+	// Every outbound email embeds library images referenced by its HTML.
+	email.SetInlineImageDir(emailImagesDir)
 	adminIDPHandler := handler.NewAdminIDPHandler(database, cryptoSvc, registry, renderer, auditLogger, logger, uploadsDir)
 	adminIDPGroupHandler := handler.NewAdminIDPGroupHandler(database, renderer, auditLogger, logger)
 	// Load all enabled IDPs into the live registry.
@@ -404,6 +408,7 @@ func main() {
 
 	adminSMTPHandler := handler.NewAdminSMTPHandler(database, cryptoSvc, renderer, auditLogger, logger)
 	adminEmailTemplatesHandler := handler.NewAdminEmailTemplatesHandler(database, renderer, sessions, auditLogger, logger)
+	adminEmailImagesHandler := handler.NewAdminEmailImagesHandler(database, renderer, sessions, auditLogger, logger, emailImagesDir)
 	adminGroupsHandler := handler.NewAdminGroupsHandler(database, registry, renderer, auditLogger, logger)
 	adminMappingsHandler := handler.NewAdminMappingsHandler(database, registry, renderer, auditLogger, logger)
 	adminAuditHandler := handler.NewAdminAuditHandler(database, renderer, logger)
@@ -432,6 +437,7 @@ func main() {
 		AdminIDPGroups:      adminIDPGroupHandler,
 		AdminSMTP:           adminSMTPHandler,
 		AdminEmailTemplates: adminEmailTemplatesHandler,
+		AdminEmailImages:    adminEmailImagesHandler,
 		AdminGroups:         adminGroupsHandler,
 		AdminMappings:       adminMappingsHandler,
 		AdminAudit:          adminAuditHandler,

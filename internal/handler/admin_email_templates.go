@@ -15,6 +15,7 @@ import (
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/db"
+	"github.com/hanej/passport/internal/email"
 )
 
 // templateVariables defines available template variables per template type.
@@ -64,6 +65,24 @@ func reportTemplateBase(templateType string) string {
 		}
 	}
 	return ""
+}
+
+// friendlyTemplateName returns the admin-facing name for a template type,
+// including per-IDP overrides.
+func friendlyTemplateName(templateType string) string {
+	if name := templateNames[templateType]; name != "" {
+		return name
+	}
+	if IsPasswordExpirationTemplate(templateType) {
+		return "Password Expiration Warning — " + strings.TrimPrefix(templateType, "password_expiration:")
+	}
+	if IsPasswordExpiredTemplate(templateType) {
+		return "Password Expired Notice — " + strings.TrimPrefix(templateType, "password_expired:")
+	}
+	if base := reportTemplateBase(templateType); base != "" {
+		return templateNames[base] + " — " + strings.TrimPrefix(templateType, base+":")
+	}
+	return templateType
 }
 
 // defaultTemplates holds the default content for each template type (matching the SQL seed).
@@ -150,27 +169,9 @@ func (h *AdminEmailTemplatesHandler) List(w http.ResponseWriter, r *http.Request
 	}
 	var rows []templateRow
 	for _, t := range templates {
-		name := templateNames[t.TemplateType]
-		if name == "" && IsPasswordExpirationTemplate(t.TemplateType) {
-			idpID := strings.TrimPrefix(t.TemplateType, "password_expiration:")
-			name = "Password Expiration Warning — " + idpID
-		}
-		if name == "" && IsPasswordExpiredTemplate(t.TemplateType) {
-			idpID := strings.TrimPrefix(t.TemplateType, "password_expired:")
-			name = "Password Expired Notice — " + idpID
-		}
-		if name == "" {
-			if base := reportTemplateBase(t.TemplateType); base != "" {
-				idpID := strings.TrimPrefix(t.TemplateType, base+":")
-				name = templateNames[base] + " — " + idpID
-			}
-		}
-		if name == "" {
-			name = t.TemplateType
-		}
 		rows = append(rows, templateRow{
 			TemplateType: t.TemplateType,
-			FriendlyName: name,
+			FriendlyName: friendlyTemplateName(t.TemplateType),
 			Subject:      t.Subject,
 			UpdatedAt:    t.UpdatedAt,
 		})
@@ -254,6 +255,11 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 		"subject", tmpl.Subject,
 	)
 
+	images, err := h.store.ListEmailImages(r.Context())
+	if err != nil {
+		h.logger.Warn("failed to load email image library", "error", err)
+	}
+
 	h.renderer.Render(w, r, "admin_email_template_form.html", PageData{
 		Title:   "Edit " + friendlyName,
 		Session: sess,
@@ -262,6 +268,9 @@ func (h *AdminEmailTemplatesHandler) Edit(w http.ResponseWriter, r *http.Request
 			"Variables":    vars,
 			"FriendlyName": friendlyName,
 			"TemplateType": templateType,
+			"Images":       images,
+			"Priority":     email.NormalizePriority(tmpl.Priority),
+			"ImagePrefix":  email.InlineImagePathPrefix,
 			"ActivePage":   "email_templates",
 		},
 	})
@@ -290,11 +299,13 @@ func (h *AdminEmailTemplatesHandler) Save(w http.ResponseWriter, r *http.Request
 
 	subject := r.FormValue("subject")
 	bodyHTML := r.FormValue("body_html")
+	priority := email.NormalizePriority(r.FormValue("priority"))
 
 	tmpl := &db.EmailTemplate{
 		TemplateType: templateType,
 		Subject:      subject,
 		BodyHTML:     bodyHTML,
+		Priority:     priority,
 	}
 
 	if err := h.store.SaveEmailTemplate(r.Context(), tmpl); err != nil {
@@ -306,6 +317,7 @@ func (h *AdminEmailTemplatesHandler) Save(w http.ResponseWriter, r *http.Request
 	h.logger.Debug("email template saved",
 		"type", templateType,
 		"subject", subject,
+		"priority", priority,
 	)
 
 	h.audit.Log(r.Context(), &db.AuditEntry{

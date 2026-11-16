@@ -1142,9 +1142,44 @@ Variables are inserted using Go template syntax: `{{.VariableName}}`.
 1. Navigate to **Admin > Email Templates**
 2. Click **Edit** on the desired template type
 3. Modify the subject line and HTML body using the TinyMCE editor
-4. Click **Save**
+4. Optionally set the **Priority** (see below)
+5. Click **Save**
 
 The TinyMCE editor provides full HTML editing capabilities including formatting, links, images, tables, and raw HTML source editing.
+
+### Priority
+
+Each template has a **Priority** of Normal (the default), High, or Low. High and Low messages carry the `X-Priority`, `Importance`, and `Priority` headers, which Outlook and Apple Mail show as a priority flag. Normal adds no headers. Gmail ignores these headers, and priority does not change delivery speed or spam filtering.
+
+A new per-IDP override starts with the global template's priority. **Reset to Default** sets the priority back to Normal.
+
+### Image Library
+
+Images such as a company logo or banner can be uploaded once and embedded in any template.
+
+**Uploading:**
+
+1. Navigate to **Admin > Email Templates** and open the **Image Library** tab
+2. Choose a PNG, JPG, or GIF file (up to 5 MB) and optionally give it a name (defaults to the file name)
+3. Click **Upload**
+
+Each upload is checked by both its extension and its actual content, and is stored under a random name in `uploads/email-images/` next to the database. The library shows each image's dimensions, size, and which templates use it.
+
+**Inserting an image into a template:**
+
+1. Open a template for editing
+2. In the **Images** panel on the right, click a thumbnail to insert it at the cursor. Library images are also listed in the editor's own **Insert image** dialog.
+3. Resize or align the image in the editor as needed, then **Save**
+
+Images wider than 600 px are inserted at a width of 600 px so they fit common email layouts. **Preview** shows images exactly where they will appear.
+
+**How images are delivered:** When an email is sent, every library image it references is attached to the message as an inline (`cid:`) part and the `<img>` tag is pointed at that part. Recipients therefore see the image without their mail client contacting PassPort, and clients that block remote images still show it. Each image is attached once, however many times it appears. This applies to every outbound templated email, including the SMTP test. Some mail clients also list inline images as attachments.
+
+Images are only embedded when the `src` points at the library (`/uploads/email-images/<file>`, as inserted by the editor). External image URLs are sent unchanged as remote images. If a referenced library file is missing on disk, the email is still sent, with that `src` unchanged.
+
+**Deleting:** An image cannot be deleted while any template (including per-IDP overrides) references it. The library lists those templates, and deleting is blocked until the image is removed from each one.
+
+> Library images are served publicly at `/uploads/email-images/` (like the branding logo) so the editor and preview can display them. Don't upload anything confidential.
 
 ### Previewing
 
@@ -1966,7 +2001,7 @@ Admins can also export and import from the web interface. Unlike the CLI flags, 
    - SMTP Settings
    - MFA Settings
    - Branding
-   - Email Templates
+   - Email Templates & Image Library
    - Upload Files
 
 The web UI import shows a results summary of what was imported and any errors.
@@ -2026,17 +2061,18 @@ The backup/export file is JSON with this top-level structure:
   "default_mfa_provider_id": "duo",
   "mfa_login_required": false,
   "branding": {...},
-  "email_templates": [...]
+  "email_templates": [...],
+  "email_images": [...]
 }
 ```
 
-`idp_groups` and `local_admin_placement` are omitted entirely when nothing has been arranged, and files written before those features existed simply lack them.
+`idp_groups` and `local_admin_placement` are omitted entirely when nothing has been arranged, and files written before those features existed simply lack them. `email_images` holds image library metadata (name, filename, size, dimensions) and is omitted when the library is empty. It is imported with the **Email Templates** section.
 
 The `secrets_encrypted` field indicates whether secret values are plaintext JSON (`false`, from `-export` or web UI) or base64-encoded encrypted blobs (`true`, from `-backup`).
 
 ### Uploaded Files
 
-Logo files (branding logo, IDP logos) live in the `uploads/` directory.
+Logo files (branding logo, IDP logos) and email library images (`uploads/email-images/`) live in the `uploads/` directory. To carry the image library across, import both **Email Templates & Image Library** (the metadata) and **Upload Files** (the images).
 
 - **Web UI export/import:** included in the ZIP and restored when the **Upload Files** section is ticked. Nothing extra to do.
 - **CLI `-backup` / `-export` / `-import`:** **not** included — those write and read a single JSON file. Copy the directory separately:

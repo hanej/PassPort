@@ -126,7 +126,7 @@ func sendPasswordEventEmail(
 		return
 	}
 
-	if err := email.SendHTML(emailCfg, userEmail, subject, body); err != nil {
+	if err := email.SendHTMLWithPriority(emailCfg, userEmail, subject, body, tmpl.Priority); err != nil {
 		logger.Warn("failed to send notification email",
 			"template", templateType, "idp_id", idpID, "username", username, "to", userEmail, "error", err)
 		return

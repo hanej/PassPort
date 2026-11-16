@@ -38,8 +38,31 @@ func validateHeaderValue(name, s string) error {
 	return nil
 }
 
-// SendHTML sends an HTML email with the given subject, body, and recipient.
+// Priority values for an email. PriorityNormal adds no priority headers.
+const (
+	PriorityNormal = "normal"
+	PriorityHigh   = "high"
+	PriorityLow    = "low"
+)
+
+// NormalizePriority maps any unrecognised value (including "") to PriorityNormal.
+func NormalizePriority(p string) string {
+	switch p {
+	case PriorityHigh, PriorityLow:
+		return p
+	}
+	return PriorityNormal
+}
+
+// SendHTML sends an HTML email with the given subject, body, and recipient at
+// normal priority.
 func SendHTML(cfg Config, to, subject, htmlBody string) error {
+	return SendHTMLWithPriority(cfg, to, subject, htmlBody, PriorityNormal)
+}
+
+// SendHTMLWithPriority sends an HTML email, marking it high or low priority
+// when requested.
+func SendHTMLWithPriority(cfg Config, to, subject, htmlBody, priority string) error {
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 
 	fromName := cfg.FromName
@@ -61,17 +84,11 @@ func SendHTML(cfg Config, to, subject, htmlBody string) error {
 	}
 	fromAddress := cfg.FromAddress
 
-	msg := fmt.Sprintf("From: %s <%s>\r\n"+
-		"To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"Date: %s\r\n"+
-		"MIME-Version: 1.0\r\n"+
-		"Content-Type: text/html; charset=UTF-8\r\n"+
-		"\r\n"+
-		"%s\r\n",
-		fromName, fromAddress, to, subject,
-		time.Now().Format(time.RFC1123Z), htmlBody,
-	)
+	body, images := embedInlineImages(htmlBody, getInlineImageDir())
+	msg, err := buildMessage(fromName, fromAddress, to, subject, body, NormalizePriority(priority), images, time.Now())
+	if err != nil {
+		return fmt.Errorf("building message: %w", err)
+	}
 
 	// Set up authentication if credentials are provided.
 	var auth smtp.Auth

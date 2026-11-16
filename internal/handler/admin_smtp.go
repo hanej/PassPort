@@ -2,24 +2,19 @@ package handler
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
-	"io"
 	"log/slog"
-	"mime"
-	"mime/quotedprintable"
-	"net"
 	"net/http"
 	"net/mail"
-	"net/smtp"
 	"time"
 
 	"github.com/hanej/passport/internal/audit"
 	"github.com/hanej/passport/internal/auth"
 	"github.com/hanej/passport/internal/crypto"
 	"github.com/hanej/passport/internal/db"
+	"github.com/hanej/passport/internal/email"
 )
 
 // SMTPConfigFields holds the non-sensitive SMTP configuration fields.
@@ -279,7 +274,7 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 
 	// Load and render the smtp_test email template.
 	tmpl, err := h.store.GetEmailTemplate(r.Context(), "smtp_test")
-	var subject, htmlBody string
+	var subject, htmlBody, priority string
 	if err != nil || tmpl == nil {
 		// Fallback if template not found.
 		subject = "PassPort Test Email"
@@ -289,6 +284,7 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 			"Timestamp": time.Now().Local().Format("Jan 2, 2006 3:04 PM MST"),
 		}
 		subject = tmpl.Subject
+		priority = tmpl.Priority
 		if rendered, err := renderSimpleTemplate(tmpl.Subject, data); err == nil {
 			subject = rendered
 		}
@@ -306,7 +302,7 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 		"from", configFields.FromAddress,
 	)
 
-	if err := sendEmail(configFields, secrets, toAddr, subject, htmlBody); err != nil {
+	if err := sendEmail(configFields, secrets, toAddr, subject, htmlBody, priority); err != nil {
 		h.logger.Warn("test email failed", "error", err, "to", toAddr)
 		h.audit.Log(r.Context(), &db.AuditEntry{
 			Timestamp: time.Now().UTC(),
@@ -339,118 +335,20 @@ func (h *AdminSMTPHandler) TestEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// buildMIMEMessage constructs a properly encoded MIME email message.
-// Headers use net/mail address formatting and RFC 2047 Q-encoding for the
-// subject. The HTML body is encoded as quoted-printable per RFC 2045.
-func buildMIMEMessage(fromName, fromAddr, to, subject, htmlBody string) ([]byte, error) {
-	from := mail.Address{Name: fromName, Address: fromAddr}
-	recipient := mail.Address{Address: to}
-
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "From: %s\r\n", from.String())
-	fmt.Fprintf(&buf, "To: %s\r\n", recipient.String())
-	fmt.Fprintf(&buf, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
-	fmt.Fprintf(&buf, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
-	buf.WriteString("MIME-Version: 1.0\r\n")
-	buf.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
-	buf.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
-	buf.WriteString("\r\n")
-
-	qw := quotedprintable.NewWriter(&buf)
-	if _, err := io.WriteString(qw, htmlBody); err != nil {
-		return nil, err
-	}
-	if err := qw.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// sendEmail sends an HTML email using the provided SMTP configuration.
-func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody string) error {
-	addr := net.JoinHostPort(cfg.Host, cfg.Port)
-
-	fromName := cfg.FromName
-	if fromName == "" {
-		fromName = "PassPort"
-	}
-
-	msg, err := buildMIMEMessage(fromName, cfg.FromAddress, to, subject, htmlBody)
-	if err != nil {
-		return fmt.Errorf("building message: %w", err)
-	}
-
-	// Set up authentication if credentials are provided.
-	var auth smtp.Auth
-	if secrets.Username != "" && secrets.Password != "" {
-		auth = smtp.PlainAuth("", secrets.Username, secrets.Password, cfg.Host)
-	}
-
-	if cfg.UseTLS {
-		// Direct TLS connection (port 465 typically).
-		return sendEmailTLS(addr, cfg.Host, cfg.TLSSkipVerify, auth, cfg.FromAddress, to, []byte(msg))
-	}
-
-	// Plain SMTP or STARTTLS — connect plaintext first.
-	client, err := smtp.Dial(addr)
-	if err != nil {
-		return fmt.Errorf("SMTP dial: %w", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	// Upgrade with STARTTLS if configured, or if the server advertises it.
-	if cfg.UseStartTLS {
-		tlsConfig := &tls.Config{ServerName: cfg.Host, InsecureSkipVerify: cfg.TLSSkipVerify}
-		if err := client.StartTLS(tlsConfig); err != nil {
-			return fmt.Errorf("STARTTLS: %w", err)
-		}
-	}
-
-	return smtpSend(client, auth, cfg.FromAddress, to, []byte(msg))
-}
-
-// sendEmailTLS sends via a direct TLS connection (SMTPS, typically port 465).
-func sendEmailTLS(addr, host string, skipVerify bool, auth smtp.Auth, from, to string, msg []byte) error {
-	tlsConfig := &tls.Config{ServerName: host, InsecureSkipVerify: skipVerify}
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("TLS dial: %w", err)
-	}
-
-	client, err := smtp.NewClient(conn, host)
-	if err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("SMTP client: %w", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	return smtpSend(client, auth, from, to, msg)
-}
-
-// smtpSend performs the AUTH, MAIL FROM, RCPT TO, DATA sequence on an smtp.Client.
-func smtpSend(client *smtp.Client, auth smtp.Auth, from, to string, msg []byte) error {
-	if auth != nil {
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("AUTH: %w", err)
-		}
-	}
-	if err := client.Mail(from); err != nil {
-		return fmt.Errorf("MAIL FROM: %w", err)
-	}
-	if err := client.Rcpt(to); err != nil {
-		return fmt.Errorf("RCPT TO: %w", err)
-	}
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("DATA: %w", err)
-	}
-	if _, err := w.Write(msg); err != nil {
-		return fmt.Errorf("writing message: %w", err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("closing message: %w", err)
-	}
-	return client.Quit()
+// sendEmail sends an HTML email using the provided SMTP configuration. Library
+// images referenced by the body are embedded inline by email.SendHTML.
+func sendEmail(cfg SMTPConfigFields, secrets SMTPSecrets, to, subject, htmlBody, priority string) error {
+	return email.SendHTMLWithPriority(email.Config{
+		Host:          cfg.Host,
+		Port:          cfg.Port,
+		FromAddress:   cfg.FromAddress,
+		FromName:      cfg.FromName,
+		UseTLS:        cfg.UseTLS,
+		UseStartTLS:   cfg.UseStartTLS,
+		TLSSkipVerify: cfg.TLSSkipVerify,
+		Username:      secrets.Username,
+		Password:      secrets.Password,
+	}, to, subject, htmlBody, priority)
 }
 
 // renderSimpleTemplate renders a Go html/template string with the given data.

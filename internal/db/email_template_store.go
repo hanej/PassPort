@@ -10,7 +10,7 @@ import (
 // ListEmailTemplates returns all email templates ordered by template_type.
 func (d *DB) ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error) {
 	rows, err := d.reader.QueryContext(ctx, `
-		SELECT id, template_type, subject, body_html, updated_at
+		SELECT id, template_type, subject, body_html, priority, updated_at
 		FROM email_templates ORDER BY template_type`)
 	if err != nil {
 		return nil, fmt.Errorf("list email templates: %w", err)
@@ -21,7 +21,7 @@ func (d *DB) ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error) {
 	for rows.Next() {
 		var t EmailTemplate
 		var updatedAt string
-		if err := rows.Scan(&t.ID, &t.TemplateType, &t.Subject, &t.BodyHTML, &updatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.TemplateType, &t.Subject, &t.BodyHTML, &t.Priority, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan email template: %w", err)
 		}
 		var parseErr error
@@ -40,12 +40,12 @@ func (d *DB) ListEmailTemplates(ctx context.Context) ([]EmailTemplate, error) {
 // Returns ErrNotFound if no matching row exists.
 func (d *DB) GetEmailTemplate(ctx context.Context, templateType string) (*EmailTemplate, error) {
 	row := d.reader.QueryRowContext(ctx, `
-		SELECT id, template_type, subject, body_html, updated_at
+		SELECT id, template_type, subject, body_html, priority, updated_at
 		FROM email_templates WHERE template_type = ?`, templateType)
 
 	var t EmailTemplate
 	var updatedAt string
-	err := row.Scan(&t.ID, &t.TemplateType, &t.Subject, &t.BodyHTML, &updatedAt)
+	err := row.Scan(&t.ID, &t.TemplateType, &t.Subject, &t.BodyHTML, &t.Priority, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -62,13 +62,14 @@ func (d *DB) GetEmailTemplate(ctx context.Context, templateType string) (*EmailT
 // SaveEmailTemplate inserts or replaces an email template, setting updated_at to now.
 func (d *DB) SaveEmailTemplate(ctx context.Context, t *EmailTemplate) error {
 	_, err := d.writer.ExecContext(ctx, `
-		INSERT INTO email_templates (template_type, subject, body_html, updated_at)
-		VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		INSERT INTO email_templates (template_type, subject, body_html, priority, updated_at)
+		VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 		ON CONFLICT(template_type) DO UPDATE SET
 			subject    = excluded.subject,
 			body_html  = excluded.body_html,
+			priority   = excluded.priority,
 			updated_at = excluded.updated_at`,
-		t.TemplateType, t.Subject, t.BodyHTML)
+		t.TemplateType, t.Subject, t.BodyHTML, normalizeTemplatePriority(t.Priority))
 	if err != nil {
 		return fmt.Errorf("save email template: %w", err)
 	}
@@ -87,4 +88,12 @@ func (d *DB) DeleteEmailTemplate(ctx context.Context, templateType string) error
 		return ErrNotFound
 	}
 	return nil
+}
+
+// normalizeTemplatePriority stores anything other than high/low as normal.
+func normalizeTemplatePriority(p string) string {
+	if p == "high" || p == "low" {
+		return p
+	}
+	return "normal"
 }
