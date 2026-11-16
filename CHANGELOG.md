@@ -7,6 +7,7 @@ All notable changes to PassPort are documented in this file.
 ## [Unreleased]
 
 ### Security
+- **Go 1.27.4 toolchain** — A `toolchain go1.27.4` directive is added (the `go` directive is raised from 1.26.10 to 1.26.11) to fix GO-2026-6859 (HTTP/1 server crash due to a `MaxBytesReader` header race in `net/http`, fixed in `go1.26.11`/`go1.27.4`). This is reachable: PassPort runs an HTTP/1 server (`internal/server`) whose handlers write response headers, so a concurrent request-body read and header write could panic. CI (`go-version: '1.27.4'`) and the Docker build (`golang:1.27.4-alpine`) are updated to the patched toolchain. `govulncheck ./...` reports no vulnerabilities affecting the code; GO-2026-5932 (`x/crypto/openpgp`, unreachable, no tagged fix in the installed version) remains the only module-level advisory.
 - **Go 1.26.10 minimum** — The `go` directive is raised from 1.26.7 to 1.26.10, which fixes GO-2026-6809 (`crypto/x509` did not distrust compromised intermediate certificates). Unlike earlier advisories this one was reachable: LDAP `StartTLS` in `idp.dialLDAP` verifies the directory's certificate chain through `x509.Certificate.Verify`. CI and the Docker build (`golang:1.26-alpine`) pick up the patched toolchain automatically. `govulncheck ./...` reports no vulnerabilities affecting the code; GO-2026-5932 (`x/crypto/openpgp`, unreachable, no tagged fix) remains the only module-level advisory.
 
 ### Fixed
@@ -16,7 +17,7 @@ All notable changes to PassPort are documented in this file.
 - **FreeIPA password policy rejections showed a generic error** — A FreeIPA rejection such as `Constraint Violation: Password reuse not permitted` reached the user as "please try again or contact your administrator", because only the AD connector classified policy failures. FreeIPA constraint violations are now reported as policy errors and the directory's reason is shown, e.g. "the new password was rejected by the directory: Password reuse not permitted." The reason is only displayed when it is short and contains no DN; otherwise the generic policy message is used. AD is unchanged, since it reports complexity, history and minimum age with the same code.
 
 ### Dependencies
-- Go modules: `go-chi/chi/v5` v5.3.2 → v5.5.0, `go-ldap/ldap/v3` v3.4.14 → v3.4.15, `yuin/goldmark` v1.8.6 → v1.8.7, `golang.org/x/crypto` v0.57.0 → v0.58.0, `modernc.org/sqlite` v1.59.0 → v1.62.0, plus indirect updates (`golang.org/x/sys`, `modernc.org/libc`, `goccy/go-json`, `dustin/go-humanize`, `ncruces/go-strftime`).
+- Go modules: `go-chi/chi/v5` v5.3.2 → v5.5.0, `go-ldap/ldap/v3` v3.4.14 → v3.4.15, `yuin/goldmark` v1.8.6 → v1.8.7, `golang.org/x/crypto` v0.57.0 → v0.59.0, `golang.org/x/net` v0.60.0 → v0.62.0 (indirect), `modernc.org/sqlite` v1.59.0 → v1.62.0, plus indirect updates (`golang.org/x/sys`, `modernc.org/libc`, `goccy/go-json`, `dustin/go-humanize`, `ncruces/go-strftime`).
 
 ---
 
