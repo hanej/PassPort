@@ -4,7 +4,7 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
-## [Unreleased]
+## [v1.3.0] - 2026-11-16
 
 ### Added
 - **Email template image library** — **Admin > Email Templates** has a new **Image Library** tab for uploading PNG, JPG, and GIF images (up to 5 MB, checked by both extension and content). The template editor has an **Images** panel: click a thumbnail to insert the image at the cursor, or pick it from TinyMCE's Insert image dialog. When an email is sent, library images are embedded in the message as inline `cid:` parts, so recipients see them without contacting PassPort. An image cannot be deleted while any template uses it; the library lists those templates. Uploads and deletions are audit logged (`email_image_upload`, `email_image_delete`). Image metadata is included in configuration export/import, and the image files travel in the ZIP's `uploads/` folder. Adds database migration `012_email_images`, which runs automatically on startup.
