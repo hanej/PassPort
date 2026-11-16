@@ -4,6 +4,13 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [v1.3.1] - 2026-11-16
+
+### Dependencies
+- CI workflows: `softprops/action-gh-release` v3.0.3 → v3.0.4, `actions/upload-artifact` v7.0.1 → v7.0.2, `actions/download-artifact` v8.0.1 → v8.0.2, `codecov/codecov-action` v7.1.0 → v7.1.1. No application code changes.
+
+---
+
 ## [v1.3.0] - 2026-11-16
 
 ### Added
