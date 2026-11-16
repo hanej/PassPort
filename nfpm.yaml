@@ -78,6 +78,10 @@ scripts:
 # Prevent RPM from rewriting the binary's shebang / stripping
 rpm:
   compression: xz
+  scripts:
+    # Runs after the outgoing package's preremove, so an upgrade leaves the
+    # service enabled and running as it was before.
+    posttrans: deploy/scripts/posttrans.sh
 
 overrides:
   rpm:

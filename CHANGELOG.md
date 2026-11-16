@@ -4,6 +4,13 @@ All notable changes to PassPort are documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Upgrading the RPM left PassPort stopped and disabled** — During `rpm -U`, the outgoing package's `preremove` script runs after the new package's `postinstall`, and it stopped and disabled the service without checking whether this was an upgrade or a removal. Every upgrade therefore needed a manual `systemctl enable --now passport`. `preremove` now only stops and disables the service when the package is removed. A new `posttrans` script, which runs after the old package's scripts, records the service state before the upgrade and restores it afterwards. That also covers the first upgrade away from v1.3.1 or earlier, whose old `preremove` still runs.
+
+---
+
 ## [v1.3.1] - 2026-11-16
 
 ### Dependencies

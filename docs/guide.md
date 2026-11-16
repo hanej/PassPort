@@ -1515,7 +1515,11 @@ The RPM and DEB packages built by `make rpm-amd64` / `make rpm-arm64` lay out th
 - generates the master key at `/etc/passport/key` if absent (base64, mode 600)
 - generates the self-signed TLS certificate under `/etc/passport/tls/` if absent
 - installs the logrotate config at `/etc/logrotate.d/passport` for `/opt/passport/logs/*.log`
-- enables and restarts the service
+- enables and starts the service on a fresh install
+
+**Upgrading:** after `rpm -U` (or `dnf upgrade`) the service is enabled and running on the new version, with no manual `systemctl` steps. Note that an upgrade enables and starts the service even if you had disabled it. Removing the package (`rpm -e`) stops and disables the service.
+
+> Packages up to v1.3.1 disabled and stopped the service on every upgrade. When upgrading *from* one of those releases, the new package's `posttrans` script puts the service back, so no manual `systemctl enable --now passport` is needed.
 
 ### Install Script
 
